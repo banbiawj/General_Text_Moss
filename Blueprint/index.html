@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>moss - 大模型接入就绪版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    
+    <script type="importmap">
+    {
+      "imports": {
+        "vue": "https://unpkg.com/vue@3/dist/vue.esm-browser.js",
+        "@tiptap/core": "https://esm.sh/@tiptap/core@2.2.4",
+        "@tiptap/starter-kit": "https://esm.sh/@tiptap/starter-kit@2.2.4"
+      }
+    }
+    </script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'] },
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #fafafa; color: #171717; }
+        
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        
+        .document-content { color: #404040; line-height: 1.8; font-weight: 400; font-size: 0.95rem; }
+        .document-content h1 { font-size: 1.8rem; font-weight: 600; color: #171717; margin-bottom: 0.5rem; margin-top: 1.5rem; letter-spacing: -0.02em; }
+        .document-content h2 { font-size: 1.5rem; font-weight: 600; color: #171717; margin-top: 1.5rem; margin-bottom: 0.5rem; padding-bottom: 0.5rem; border-bottom: 1px solid #e5e5e5; }
+        .document-content h3 { font-size: 1.25rem; font-weight: 600; color: #262626; margin-top: 1.25rem; margin-bottom: 0.5rem;}
+        .document-content h4 { font-size: 1.1rem; font-weight: 600; color: #404040; margin-top: 1rem; margin-bottom: 0.5rem;}
+        .document-content h5 { font-size: 1rem; font-weight: 600; color: #525252; margin-top: 1rem; margin-bottom: 0.5rem;}
+        .document-content h6 { font-size: 0.95rem; font-weight: 600; color: #737373; margin-top: 1rem; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em;}
+        .document-content p { margin-bottom: 0.75rem; }
+        .document-content ul { list-style-type: none; padding-left: 0; margin-bottom: 1.5rem; }
+        .document-content li { position: relative; padding-left: 1rem; margin-bottom: 0.5rem; }
+        .document-content li::before { content: '•'; position: absolute; left: 0; color: #a3a3a3; font-weight: bold; }
+        .document-content strong { color: #171717; font-weight: 600; }
+        .document-content code { background-color: #f5f5f5; padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-size: 0.85em; font-family: monospace; }
+
+        .ProseMirror:focus { outline: none; }
+
+        .cursor-blink::after { content: '|'; animation: blink 1s step-start infinite; color: #171717; font-weight: 300; }
+        @keyframes blink { 50% { opacity: 0; } }
+
+        .resizing { user-select: none; -webkit-user-select: none; cursor: ns-resize !important; }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden selection:bg-black selection:text-white" :class="{'resizing': isDragging}">
+
+<div id="app" class="relative h-full w-full flex flex-col bg-[#fafafa]">
+
+    <div v-if="showAIPopup" 
+         class="fixed z-[200] bg-white rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-200 p-2 flex items-center gap-3 w-80 transform transition-all duration-200 ease-out"
+         :style="{ top: aiPopupPos.top + 'px', left: aiPopupPos.left + 'px' }">
+        <div class="w-7 h-7 rounded-full bg-gray-50 flex items-center justify-center shrink-0 border border-gray-200">
+            <i class="fa-solid fa-asterisk text-gray-500 text-[10px]"></i>
+        </div>
+        <input ref="aiPopupInputRef" 
+               v-model="aiPopupInput"
+               @keyup.enter="submitAIPopup"
+               @keydown.esc="closeAIPopup"
+               @blur="closeAIPopup"
+               type="text" 
+               placeholder="给 moss 发送指令 (Enter 确认, Esc 取消)" 
+               class="flex-1 bg-transparent border-none outline-none text-[14px] text-gray-800 placeholder-gray-400">
+    </div>
+
+    <div ref="panelRef" 
+         class="fixed left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 flex flex-col overflow-visible"
+         :class="[
+            isFullScreen ? 'top-0 w-full max-w-none h-full rounded-none z-[100]' : 'top-6 w-[95%] max-w-4xl rounded-2xl z-40',
+            isDragging ? 'transition-none' : 'transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]'
+         ]"
+         :style="isFullScreen ? {} : { height: panelHeight + 'px' }">
+        
+        <div class="bg-white/50 px-6 py-4 flex justify-between items-center shrink-0 border-b border-gray-100 transition-all duration-300"
+             :class="isFullScreen ? 'rounded-none' : 'rounded-t-2xl'">
+            <div class="flex items-center gap-3 text-gray-500">
+                <i class="fa-regular fa-file-lines text-gray-400"></i>
+                <span class="font-medium text-xs tracking-wider uppercase text-gray-500">Document.md</span>
+            </div>
+            <div class="flex gap-4 items-center">
+                <span v-if="isModifying" class="text-xs text-gray-500 flex items-center gap-2 pr-2">
+                    <i class="fa-solid fa-pen-nib animate-bounce text-xs"></i> AI Processing...
+                </span>
+                <button class="text-xs bg-white border border-gray-200 text-gray-700 px-5 py-2.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm font-medium">
+                    Upload
+                </button>
+            </div>
+        </div>
+
+        <div class="p-8 md:p-14 overflow-y-auto flex-1 document-content relative scroll-smooth no-scrollbar" id="document-container">
+            <div class="max-w-3xl mx-auto w-full">
+                <div ref="editorContainer" :class="{'cursor-blink': isModifying}"></div>
+            </div>
+            
+            <div v-if="isModifying" class="absolute inset-0 bg-white/40 backdrop-blur-[1px] flex items-center justify-center z-10 transition-all duration-300">
+                <div class="bg-white border border-gray-200 shadow-lg px-5 py-2.5 rounded-full text-gray-700 flex items-center gap-2 text-sm font-medium">
+                    <i class="fa-solid fa-circle-notch fa-spin text-gray-400"></i> AI is thinking...
+                </div>
+            </div>
+        </div>
+
+        <div class="absolute bottom-6 right-6 z-50 flex items-center gap-3 transition-all duration-300">
+            <button @click="saveContent" 
+                    class="w-10 h-10 rounded-full bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 transition flex items-center justify-center shadow-lg transform hover:scale-105 active:scale-95"
+                    title="保存文本 (Ctrl+S)">
+                <i v-if="isSaving" class="fa-solid fa-check text-green-500 text-sm transition-all duration-300"></i>
+                <i v-else class="fa-regular fa-floppy-disk text-sm transition-all duration-300"></i>
+            </button>
+
+            <button @click="toggleFullScreen" 
+                    class="w-10 h-10 rounded-full bg-black hover:bg-gray-800 text-white transition flex items-center justify-center shadow-lg transform hover:scale-105 active:scale-95"
+                    title="全屏切换 (Ctrl+Shift+F)">
+                <i :class="isFullScreen ? 'fa-solid fa-down-left-and-up-right-to-center' : 'fa-solid fa-up-right-and-down-left-from-center'" class="text-xs transition-all duration-300"></i>
+            </button>
+        </div>
+
+        <div v-if="!isFullScreen"
+             class="absolute -bottom-2 left-0 w-full h-4 cursor-ns-resize z-[60]"
+             @mousedown="startDragging"></div>
+    </div>
+
+    <div class="relative w-full max-w-4xl mx-auto h-screen overflow-y-auto pb-32 px-4 md:px-0 scroll-smooth no-scrollbar" 
+         id="chat-container"
+         :class="[
+            isFullScreen ? 'opacity-0 pointer-events-none z-0 scale-95 blur-sm' : 'opacity-100 z-10 scale-100 blur-0',
+            isDragging ? 'transition-none' : 'transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]'
+         ]"
+         :style="isFullScreen ? {} : { paddingTop: (chatPaddingTop + panelHeight) + 'px' }">
+        
+        <div class="flex flex-col gap-6 w-full">
+            <div v-for="(msg, index) in messages" :key="index" 
+                 class="flex gap-4 max-w-[85%] group" 
+                 :class="msg.role === 'user' ? 'ml-auto flex-row-reverse' : ''">
+                
+                <div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 border border-gray-200 bg-white"
+                     :class="msg.role === 'user' ? 'bg-black border-black' : ''">
+                    <span v-if="msg.role === 'user'" class="text-white text-sm font-medium">@</span>
+                    <i v-else class="fa-solid fa-asterisk text-gray-600 text-xs"></i>
+                </div>
+
+                <div class="p-4 rounded-2xl text-[15px] leading-relaxed"
+                     :class="msg.role === 'user' ? 'bg-black text-white rounded-tr-sm shadow-sm' : 'bg-white border border-gray-100 text-gray-800 rounded-tl-sm shadow-sm'">
+                    {{ msg.content }}
+                </div>
+            </div>
+
+            <div v-if="isThinking" class="flex gap-4 max-w-[85%]">
+                <div class="w-8 h-8 rounded-full border border-gray-200 bg-white flex items-center justify-center shrink-0">
+                    <i class="fa-solid fa-asterisk text-gray-300 text-xs"></i>
+                </div>
+                <div class="p-4 rounded-2xl rounded-tl-sm bg-white border border-gray-100 flex items-center h-[52px] shadow-sm">
+                    <i class="fa-solid fa-ellipsis text-gray-400 animate-pulse"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="fixed left-1/2 transform -translate-x-1/2 w-[95%] max-w-3xl transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]"
+         :class="isFullScreen ? 'bottom-[-100px] opacity-0 pointer-events-none z-0' : 'bottom-6 opacity-100 z-50'">
+        <div class="bg-white rounded-full shadow-[0_4px_20px_rgb(0,0,0,0.05)] border border-gray-200 p-2 pl-5 flex items-center gap-3 transition-all focus-within:border-gray-300">
+            <input v-model="inputText" 
+                   @keyup.enter="sendMessage"
+                   type="text" 
+                   placeholder="与 moss 对话，输入指令以处理文本..." 
+                   class="flex-1 bg-transparent border-none outline-none text-[15px] text-gray-800 placeholder-gray-400 py-3 font-light"
+                   :disabled="isModifying">
+            <button @click="sendMessage" 
+                    :disabled="!inputText.trim() || isModifying"
+                    class="w-10 h-10 rounded-full bg-black hover:bg-gray-800 disabled:bg-gray-100 disabled:text-gray-400 text-white transition-all flex items-center justify-center shrink-0 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95">
+                <i class="fa-solid fa-arrow-up text-sm"></i>
+            </button>
+        </div>
+    </div>
+
+</div>
+
+<script type="module">
+    import { createApp, ref, nextTick, onMounted, onUnmounted } from 'vue';
+    import { Editor, Node, mergeAttributes, Extension } from '@tiptap/core';
+    import StarterKit from '@tiptap/starter-kit';
+
+    const CustomDiv = Node.create({
+        name: 'customDiv',
+        group: 'block',
+        content: 'block*', 
+        parseHTML() { return [{ tag: 'div' }] },
+        renderHTML({ HTMLAttributes }) { return ['div', mergeAttributes(HTMLAttributes), 0] }
+    });
+
+    const GlobalAttributes = Extension.create({
+        name: 'globalAttributes',
+        addGlobalAttributes() {
+            return [
+                {
+                    types: ['heading', 'paragraph', 'customDiv', 'bulletList', 'listItem'],
+                    attributes: {
+                        class: { default: null, parseHTML: el => el.getAttribute('class'), renderHTML: attrs => attrs.class ? { class: attrs.class } : {} },
+                        id: { default: null, parseHTML: el => el.getAttribute('id'), renderHTML: attrs => attrs.id ? { id: attrs.id } : {} },
+                        style: { default: null, parseHTML: el => el.getAttribute('style'), renderHTML: attrs => attrs.style ? { style: attrs.style } : {} }
+                    }
+                }
+            ]
+        }
+    });
+
+    createApp({
+        setup() {
+            const inputText = ref('');
+            const isModifying = ref(false);
+            const isThinking = ref(false);
+            const isFullScreen = ref(false);
+            const isSaving = ref(false);
+            
+            const defaultPanelHeight = window.innerHeight * 0.55; 
+            const panelHeight = ref(defaultPanelHeight);
+            const chatPaddingTop = 80;
+
+            const isDragging = ref(false);
+            const startY = ref(0);
+            const startHeight = ref(0);
+
+            const editorContainer = ref(null); 
+            let tiptapEditor = null; 
+
+            const showAIPopup = ref(false);
+            const aiPopupPos = ref({ top: 0, left: 0 });
+            const aiPopupInput = ref('');
+            const aiPopupInputRef = ref(null);
+
+            const messages = ref([
+                {
+                    role: 'ai',
+                    content: 'Moss 前端骨架与交互链路已全部就绪，测试硬编码已清理完毕！随时等待接入大模型 API。'
+                }
+            ]);
+
+            // 去除了原先为了测试写死的“优化”文案，保留基本的引导文档
+            const initialContent = `
+                <h1>欢迎使用 moss</h1>
+                <p class="text-sm text-gray-500 mb-8">智能文本与文档协作助手</p>
+                
+                <h2>功能特性</h2>
+                <ul>
+                    <li><strong>全键盘排版：</strong> 光标放置于段落处，按 <code>Ctrl + 1~6</code> 切换标题层级。</li>
+                    <li><strong>层级升降：</strong> 按 <code>Ctrl + +</code> 提升当前标题，按 <code>Ctrl + -</code> 降低当前标题。</li>
+                    <li><strong>AI 悬浮窗：</strong> 使用 <code>Ctrl + /</code> 唤起光标处悬浮指令窗。</li>
+                    <li><strong>快捷操作：</strong> <code>Ctrl + S</code> 保存，<code>Ctrl + Shift + F</code> 全屏切换。</li>
+                </ul>
+
+                <div id="demo-section" class="transition-colors duration-500 rounded-lg p-2 -mx-2 mt-4">
+                    <h2>大模型接入预留区</h2>
+                    <p>此段落包裹在一个预留了 ID 的 DIV 节点中。</p>
+                    <p>等待大模型 API 接入后，只需将修改后的 HTML 塞入编辑器，并调用封装好的 <code>scrollToTarget(id)</code> 和 <code>highlightTarget(id)</code> 即可在此处触发交互反馈。</p>
+                </div>
+                
+                <div style="height: 300px;"><p class="text-gray-300 text-sm mt-10">（用来产生滚动条的占位空间）</p></div> 
+            `;
+
+            const contentHTML = ref(initialContent);
+
+            const scrollToBottom = () => {
+                const container = document.getElementById('chat-container');
+                if (container) container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+            };
+
+            const saveContent = () => {
+                if (isSaving.value) return;
+                isSaving.value = true;
+                // TODO: 接入保存接口，将 contentHTML.value 发送至后端
+                setTimeout(() => { isSaving.value = false; }, 1500);
+            };
+
+            const openAIPopup = () => {
+                if (!tiptapEditor) return;
+                if (!tiptapEditor.isFocused) tiptapEditor.commands.focus();
+
+                const { from } = tiptapEditor.state.selection;
+                const coords = tiptapEditor.view.coordsAtPos(from);
+
+                aiPopupPos.value = {
+                    top: coords.bottom + 10,
+                    left: coords.left
+                };
+
+                showAIPopup.value = true;
+                nextTick(() => {
+                    if (aiPopupInputRef.value) aiPopupInputRef.value.focus();
+                });
+            };
+
+            const closeAIPopup = () => {
+                showAIPopup.value = false;
+                aiPopupInput.value = '';
+                if (tiptapEditor) tiptapEditor.commands.focus();
+            };
+
+            const submitAIPopup = () => {
+                if (!aiPopupInput.value.trim()) return;
+                const cmd = aiPopupInput.value;
+                closeAIPopup();
+                inputText.value = cmd;
+                sendMessage(); // 复用主发送逻辑
+            };
+
+            // -------- 提取为通用方法：供后续大模型流式处理完毕后调用 --------
+            // 1. 通用滚动方法
+            const scrollToTarget = (targetId) => {
+                const container = document.getElementById('document-container');
+                const target = document.getElementById(targetId);
+                if (container && target) {
+                    container.scrollTo({ top: target.offsetTop - 20, behavior: 'smooth' });
+                }
+            };
+
+            // 2. 通用高亮方法 (基于 Tiptap Transaction)
+            const highlightTarget = (targetId) => {
+                if (!tiptapEditor) return;
+                let targetPos = null;
+                let originalClasses = '';
+
+                tiptapEditor.state.doc.descendants((node, pos) => {
+                    if (node.attrs.id === targetId) {
+                        targetPos = pos;
+                        originalClasses = node.attrs.class || '';
+                    }
+                });
+
+                if (targetPos !== null) {
+                    tiptapEditor.view.dispatch(
+                        tiptapEditor.state.tr.setNodeMarkup(targetPos, undefined, {
+                            ...tiptapEditor.state.doc.nodeAt(targetPos).attrs,
+                            class: originalClasses + ' bg-blue-50'
+                        })
+                    );
+
+                    setTimeout(() => {
+                        tiptapEditor.view.dispatch(
+                            tiptapEditor.state.tr.setNodeMarkup(targetPos, undefined, {
+                                ...tiptapEditor.state.doc.nodeAt(targetPos).attrs,
+                                class: originalClasses
+                            })
+                        );
+                    }, 2000);
+                }
+            };
+            // ----------------------------------------------------------------
+
+            const handleKeyDown = (e) => {
+                const isInputFocused = document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA';
+
+                if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+                    e.preventDefault(); 
+                    saveContent();       
+                }
+                if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+                    e.preventDefault();
+                    toggleFullScreen();
+                }
+
+                if (isInputFocused && !showAIPopup.value) return;
+                if (!tiptapEditor) return;
+
+                if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+                    e.preventDefault();
+                    openAIPopup();
+                }
+                
+                if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '6') {
+                    e.preventDefault();
+                    const level = parseInt(e.key);
+                    tiptapEditor.commands.toggleHeading({ level });
+                }
+
+                if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+                    e.preventDefault();
+                    if (tiptapEditor.isActive('heading')) {
+                        const currentLevel = tiptapEditor.getAttributes('heading').level;
+                        if (currentLevel > 1) tiptapEditor.commands.setHeading({ level: currentLevel - 1 });
+                    } else {
+                        tiptapEditor.commands.setHeading({ level: 6 });
+                    }
+                }
+
+                if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+                    e.preventDefault();
+                    if (tiptapEditor.isActive('heading')) {
+                        const currentLevel = tiptapEditor.getAttributes('heading').level;
+                        if (currentLevel < 6) {
+                            tiptapEditor.commands.setHeading({ level: currentLevel + 1 });
+                        } else {
+                            tiptapEditor.commands.setParagraph();
+                        }
+                    }
+                }
+            };
+
+            const sendMessage = async () => {
+                if (!inputText.value.trim() || isModifying.value) return;
+
+                const currentInput = inputText.value;
+                messages.value.push({ role: 'user', content: currentInput });
+                inputText.value = '';
+                await nextTick();
+                scrollToBottom();
+
+                isThinking.value = true;
+                
+                // 【骨架占位逻辑】：模拟大模型网络请求，等待接入真实 API
+                setTimeout(async () => {
+                    isThinking.value = false;
+                    
+                    /* * TODO: 接入真实大模型流程示例：
+                     * 1. 拿到大模型响应，提取所需替换的目标区块 ID 和 新内容。
+                     * 2. 调用 tiptapEditor.commands.setContent(newHTML) 或进行局部替换。
+                     * 3. 视觉反馈：
+                     * scrollToTarget(targetId);
+                     * highlightTarget(targetId);
+                     */
+                    
+                    messages.value.push({ 
+                        role: 'ai', 
+                        content: '目前处于前端框架就绪状态。后续接入真实大模型后，我将直接处理您的指令并动态映射到底层文档数据中。' 
+                    });
+                    
+                    await nextTick();
+                    scrollToBottom();
+                }, 1000); // 模拟网络延迟 1 秒
+            };
+
+            const toggleFullScreen = () => {
+                isFullScreen.value = !isFullScreen.value;
+            };
+
+            const startDragging = (e) => {
+                if (isFullScreen.value) return;
+                
+                e.preventDefault(); 
+                if (window.getSelection) {
+                    window.getSelection().removeAllRanges();
+                }
+
+                isDragging.value = true;
+                startY.value = e.clientY;
+                startHeight.value = panelHeight.value;
+                document.addEventListener('mousemove', handleDragging);
+                document.addEventListener('mouseup', stopDragging);
+            };
+
+            const handleDragging = (e) => {
+                if (!isDragging.value) return;
+                let newHeight = startHeight.value + (e.clientY - startY.value);
+                const minHeight = 200;
+                const maxHeight = window.innerHeight - 150;
+                if (newHeight < minHeight) newHeight = minHeight;
+                if (newHeight > maxHeight) newHeight = maxHeight;
+                panelHeight.value = newHeight;
+            };
+
+            const stopDragging = () => {
+                isDragging.value = false;
+                document.removeEventListener('mousemove', handleDragging);
+                document.removeEventListener('mouseup', stopDragging);
+            };
+
+            onMounted(() => {
+                tiptapEditor = new Editor({
+                    element: editorContainer.value,
+                    extensions: [
+                        StarterKit,
+                        CustomDiv,
+                        GlobalAttributes
+                    ],
+                    content: contentHTML.value,
+                    editorProps: {
+                        attributes: {
+                            spellcheck: 'false',
+                        }
+                    },
+                    onUpdate: ({ editor }) => {
+                        contentHTML.value = editor.getHTML();
+                    }
+                });
+
+                window.addEventListener('keydown', handleKeyDown);
+                window.addEventListener('resize', () => {
+                    const maxHeight = window.innerHeight - 150;
+                    if (panelHeight.value > maxHeight) panelHeight.value = maxHeight;
+                });
+            });
+
+            onUnmounted(() => {
+                window.removeEventListener('keydown', handleKeyDown);
+                if (tiptapEditor) {
+                    tiptapEditor.destroy();
+                }
+            });
+
+            return { 
+                inputText, messages, contentHTML, isModifying, isThinking, 
+                panelHeight, sendMessage, chatPaddingTop, isDragging, 
+                startDragging, isFullScreen, toggleFullScreen,
+                editorContainer,
+                isSaving, saveContent,
+                showAIPopup, aiPopupPos, aiPopupInput, aiPopupInputRef, submitAIPopup, closeAIPopup
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>

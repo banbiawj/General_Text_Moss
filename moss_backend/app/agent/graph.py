@@ -42,6 +42,7 @@ def get_graph():
         system_prompt = build_system_prompt(
             canvas_snapshot=state["canvas_snapshot"],
             focus_element_id=state.get("focus_element_id"),
+            focus_block_id=state.get("focus_block_id"),
         )
         llm_messages = [SystemMessage(content=system_prompt), *state["messages"]]
         llm_call_id = uuid4().hex
@@ -84,12 +85,13 @@ async def stream_agent_events(
     session_id: str,
     user_input: str,
     focus_element_id: str | None,
+    focus_block_id: str | None,
     canvas_snapshot: str,
 ) -> AsyncIterator[MutationEvent]:
     settings = get_settings()
 
     if settings.enable_mock_llm or not settings.llm_api_key:
-        async for event in _mock_stream(user_input, focus_element_id, canvas_snapshot):
+        async for event in _mock_stream(user_input, focus_element_id, focus_block_id, canvas_snapshot):
             yield event
         return
 
@@ -97,6 +99,7 @@ async def stream_agent_events(
         "messages": [HumanMessage(content=user_input)],
         "canvas_snapshot": canvas_snapshot,
         "focus_element_id": focus_element_id,
+        "focus_block_id": focus_block_id,
         "session_id": session_id,
         "request_id": uuid4().hex,
     }
@@ -129,9 +132,10 @@ async def stream_agent_events(
 async def _mock_stream(
     user_input: str,
     focus_element_id: str | None,
+    focus_block_id: str | None,
     canvas_snapshot: str,
 ) -> AsyncIterator[MutationEvent]:
-    target_id = _select_target_id(focus_element_id, canvas_snapshot)
+    target_id = _select_target_id(focus_element_id, focus_block_id, canvas_snapshot)
     wants_mutation = _looks_like_mutation(user_input)
 
     if not wants_mutation:
@@ -214,9 +218,15 @@ def _looks_like_mutation(text: str) -> bool:
     return any(hint in text for hint in mutation_hints)
 
 
-def _select_target_id(focus_element_id: str | None, canvas_snapshot: str) -> str:
+def _select_target_id(
+    focus_element_id: str | None,
+    focus_block_id: str | None,
+    canvas_snapshot: str,
+) -> str:
     if focus_element_id:
         return focus_element_id
+    if focus_block_id:
+        return focus_block_id
     match = re.search(r'id=["\']([^"\']+)["\']', canvas_snapshot)
     return match.group(1) if match else "demo-section"
 

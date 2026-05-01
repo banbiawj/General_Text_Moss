@@ -41,6 +41,7 @@ async def chat_stream(payload: ChatRequest) -> StreamingResponse:
                 session_id=payload.session_id,
                 user_input=payload.user_input,
                 focus_element_id=payload.focus_element_id,
+                focus_block_id=payload.focus_block_id,
                 canvas_snapshot=payload.canvas_snapshot,
             ):
                 yield _sse(event["event"], event.get("data", {}))

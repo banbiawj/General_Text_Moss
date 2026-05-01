@@ -122,5 +122,5 @@ def _clean_text(text: str) -> str:
 
 
 def _block_id() -> str:
-    return f"block-{uuid4().hex[:12]}"
+    return f"moss-block-{uuid4().hex[:12]}"
 

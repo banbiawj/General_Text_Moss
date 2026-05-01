@@ -15,6 +15,13 @@ SYSTEM_PROMPT_TEMPLATE = """你是 Moss 智能文档助手，负责基于用户�
 当前焦点元素 ID：
 {focus_element_id}
 
+Current top-level focus block ID:
+{focus_block_id}
+
+Focus semantics:
+- focus_element_id is the precise cursor or temporary anchor element.
+- focus_block_id is the top-level editable block containing that anchor.
+
 当前文档快照：
 ```html
 {canvas_snapshot}
@@ -22,9 +29,14 @@ SYSTEM_PROMPT_TEMPLATE = """你是 Moss 智能文档助手，负责基于用户�
 """
 
 
-def build_system_prompt(canvas_snapshot: str, focus_element_id: str | None) -> str:
+def build_system_prompt(
+    canvas_snapshot: str,
+    focus_element_id: str | None,
+    focus_block_id: str | None = None,
+) -> str:
     return SYSTEM_PROMPT_TEMPLATE.format(
         canvas_snapshot=canvas_snapshot.strip() or "<empty-document />",
+        focus_block_id=focus_block_id or "not provided",
         focus_element_id=focus_element_id or "未提供",
     )
 

@@ -206,6 +206,9 @@
     const API_BASE = window.MOSS_API_BASE || (window.location.protocol.startsWith('http') ? window.location.origin : DEFAULT_API_BASE);
     const apiUrl = (path) => `${API_BASE.replace(/\/$/, '')}${path}`;
     const makeId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const MOSS_BLOCK_ID_PREFIX = 'moss-block-';
+    const MOSS_TEMP_ANCHOR_PREFIX = 'moss-temp-anchor-';
+    const TEMP_ANCHOR_ATTR = 'dataMossTempAnchor';
 
     const CustomDiv = Node.create({
         name: 'customDiv',
@@ -224,7 +227,12 @@
                     attributes: {
                         class: { default: null, parseHTML: el => el.getAttribute('class'), renderHTML: attrs => attrs.class ? { class: attrs.class } : {} },
                         id: { default: null, parseHTML: el => el.getAttribute('id'), renderHTML: attrs => attrs.id ? { id: attrs.id } : {} },
-                        style: { default: null, parseHTML: el => el.getAttribute('style'), renderHTML: attrs => attrs.style ? { style: attrs.style } : {} }
+                        style: { default: null, parseHTML: el => el.getAttribute('style'), renderHTML: attrs => attrs.style ? { style: attrs.style } : {} },
+                        dataMossTempAnchor: {
+                            default: null,
+                            parseHTML: el => el.getAttribute('data-moss-temp-anchor'),
+                            renderHTML: attrs => attrs.dataMossTempAnchor ? { 'data-moss-temp-anchor': attrs.dataMossTempAnchor } : {}
+                        }
                     }
                 }
             ]
@@ -254,6 +262,10 @@
             const editorContainer = ref(null);
             const fileInputRef = ref(null);
             let tiptapEditor = null;
+            let lastFocusAnchor = null;
+            let lastTopLevelSignature = '';
+            let idMaintenanceQueued = false;
+            let isMaintainingDocumentIds = false;
 
             const showAIPopup = ref(false);
             const aiPopupPos = ref({ top: 0, left: 0 });
@@ -289,6 +301,281 @@
             `;
 
             const contentHTML = ref(initialContent);
+
+            const nodeSupportsAttr = (node, attrName) => {
+                return Boolean(node?.type?.spec?.attrs && Object.prototype.hasOwnProperty.call(node.type.spec.attrs, attrName));
+            };
+
+            const collectEditorIds = () => {
+                const ids = new Set();
+                if (!tiptapEditor) return ids;
+                tiptapEditor.state.doc.descendants((node) => {
+                    if (node.attrs?.id) ids.add(String(node.attrs.id));
+                });
+                return ids;
+            };
+
+            const createUniqueEditorId = (prefix, ids = collectEditorIds()) => {
+                let id = '';
+                do {
+                    id = `${prefix}${String(makeId()).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+                } while (ids.has(id));
+                ids.add(id);
+                return id;
+            };
+
+            const topLevelStructureSignature = () => {
+                if (!tiptapEditor) return '';
+                const parts = [];
+                tiptapEditor.state.doc.forEach((node, _offset, index) => {
+                    parts.push(`${index}:${node.type.name}:${node.attrs?.id || ''}:${node.childCount}`);
+                });
+                return parts.join('|');
+            };
+
+            const refreshTopLevelSignature = () => {
+                lastTopLevelSignature = topLevelStructureSignature();
+            };
+
+            const getSelectionAnchorCandidate = () => {
+                if (!tiptapEditor) return null;
+
+                const { from, $from } = tiptapEditor.state.selection;
+                let targetDepth = null;
+
+                for (let depth = $from.depth; depth >= 1; depth -= 1) {
+                    if ($from.node(depth)?.type?.name === 'listItem') {
+                        targetDepth = depth;
+                        break;
+                    }
+                }
+
+                if (targetDepth === null) {
+                    for (let depth = $from.depth; depth >= 1; depth -= 1) {
+                        const node = $from.node(depth);
+                        if (node?.isTextblock || node?.type?.name === 'blockquote' || node?.type?.name === 'customDiv') {
+                            targetDepth = depth;
+                            break;
+                        }
+                    }
+                }
+
+                if (targetDepth === null && $from.depth >= 1) targetDepth = 1;
+                if (targetDepth === null) return null;
+
+                const node = $from.node(targetDepth);
+                const blockNode = $from.depth >= 1 ? $from.node(1) : node;
+                let targetPos = from;
+                try {
+                    targetPos = $from.before(targetDepth);
+                } catch {
+                    targetPos = from;
+                }
+
+                return {
+                    elementId: node?.attrs?.id || null,
+                    blockId: blockNode?.attrs?.id || null,
+                    pos: from,
+                    targetPos,
+                    nodeType: node?.type?.name || null
+                };
+            };
+
+            const updateLastFocusAnchor = () => {
+                const anchor = getSelectionAnchorCandidate();
+                if (!anchor) return lastFocusAnchor;
+                lastFocusAnchor = {
+                    elementId: anchor.elementId,
+                    blockId: anchor.blockId,
+                    pos: anchor.pos
+                };
+                return lastFocusAnchor;
+            };
+
+            const ensureTopLevelBlockIds = () => {
+                if (!tiptapEditor) return contentHTML.value;
+
+                isMaintainingDocumentIds = true;
+                try {
+                    const ids = collectEditorIds();
+                    const seenTopLevelIds = new Set();
+                    let tr = tiptapEditor.state.tr;
+                    tiptapEditor.state.doc.forEach((node, offset) => {
+                        if (!node.isBlock || !nodeSupportsAttr(node, 'id')) return;
+                        const currentId = node.attrs?.id ? String(node.attrs.id) : '';
+                        const needsGeneratedId = !currentId
+                            || currentId.startsWith(MOSS_TEMP_ANCHOR_PREFIX)
+                            || (currentId.startsWith(MOSS_BLOCK_ID_PREFIX) && seenTopLevelIds.has(currentId));
+
+                        if (!needsGeneratedId) {
+                            seenTopLevelIds.add(currentId);
+                            return;
+                        }
+
+                        const nextId = createUniqueEditorId(MOSS_BLOCK_ID_PREFIX, ids);
+                        seenTopLevelIds.add(nextId);
+                        const attrs = {
+                            ...node.attrs,
+                            id: nextId
+                        };
+                        if (nodeSupportsAttr(node, TEMP_ANCHOR_ATTR) && node.attrs?.[TEMP_ANCHOR_ATTR]) {
+                            attrs[TEMP_ANCHOR_ATTR] = null;
+                        }
+                        tr = tr.setNodeMarkup(offset, undefined, {
+                            ...attrs
+                        });
+                    });
+
+                    if (tr.docChanged) tiptapEditor.view.dispatch(tr);
+                    contentHTML.value = tiptapEditor.getHTML();
+                    refreshTopLevelSignature();
+                    updateLastFocusAnchor();
+                    return contentHTML.value;
+                } finally {
+                    isMaintainingDocumentIds = false;
+                }
+            };
+
+            const queueTopLevelIdMaintenance = () => {
+                if (idMaintenanceQueued || isMaintainingDocumentIds) return;
+                idMaintenanceQueued = true;
+                window.requestAnimationFrame(() => {
+                    idMaintenanceQueued = false;
+                    ensureTopLevelBlockIds();
+                });
+            };
+
+            const addTemporaryAnchor = (anchor) => {
+                if (!tiptapEditor || !anchor) return null;
+                const node = tiptapEditor.state.doc.nodeAt(anchor.targetPos);
+                if (!node || node.attrs?.id || !nodeSupportsAttr(node, 'id') || !nodeSupportsAttr(node, TEMP_ANCHOR_ATTR)) {
+                    return node?.attrs?.id || null;
+                }
+
+                const tempAnchorId = createUniqueEditorId(MOSS_TEMP_ANCHOR_PREFIX);
+                const tr = tiptapEditor.state.tr.setNodeMarkup(anchor.targetPos, undefined, {
+                    ...node.attrs,
+                    id: tempAnchorId,
+                    [TEMP_ANCHOR_ATTR]: 'true'
+                });
+                tiptapEditor.view.dispatch(tr);
+                contentHTML.value = tiptapEditor.getHTML();
+                refreshTopLevelSignature();
+                return tempAnchorId;
+            };
+
+            const cleanupTemporaryAnchors = (tempAnchorId = null) => {
+                if (!tiptapEditor) return;
+
+                let tr = tiptapEditor.state.tr;
+                tiptapEditor.state.doc.descendants((node, pos) => {
+                    const id = node.attrs?.id || '';
+                    const hasTempAttr = Boolean(node.attrs?.[TEMP_ANCHOR_ATTR]);
+                    const isTrackedTemp = Boolean(tempAnchorId && id === tempAnchorId);
+                    if (!hasTempAttr && !isTrackedTemp) return;
+
+                    const attrs = { ...node.attrs };
+                    if ((hasTempAttr || isTrackedTemp) && String(id).startsWith(MOSS_TEMP_ANCHOR_PREFIX) && nodeSupportsAttr(node, 'id')) {
+                        attrs.id = null;
+                    }
+                    if (nodeSupportsAttr(node, TEMP_ANCHOR_ATTR)) {
+                        attrs[TEMP_ANCHOR_ATTR] = null;
+                    }
+                    tr = tr.setNodeMarkup(pos, undefined, attrs);
+                });
+
+                if (!tr.docChanged) return;
+                tiptapEditor.view.dispatch(tr);
+                contentHTML.value = tiptapEditor.getHTML();
+                refreshTopLevelSignature();
+                updateLastFocusAnchor();
+            };
+
+            const getEditorDomElementById = (id) => {
+                if (!id || !tiptapEditor?.view?.dom) return null;
+                return findById(tiptapEditor.view.dom, id);
+            };
+
+            const getTopLevelBlockIdForElementId = (id) => {
+                const target = getEditorDomElementById(id);
+                if (!target) return null;
+
+                let current = target;
+                while (current.parentElement && current.parentElement !== tiptapEditor.view.dom) {
+                    current = current.parentElement;
+                }
+                return current?.id || null;
+            };
+
+            const snapshotContainsId = (html, id) => {
+                if (!id) return false;
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(`<div data-moss-root>${html || ''}</div>`, 'text/html');
+                return Boolean(findById(doc.body.firstElementChild, id));
+            };
+
+            const prepareAgentRequestAnchors = (explicitFocusId = null) => {
+                const request = {
+                    focusElementId: null,
+                    focusBlockId: null,
+                    canvasSnapshot: contentHTML.value,
+                    tempAnchorId: null
+                };
+                if (!tiptapEditor) return request;
+
+                cleanupTemporaryAnchors();
+                ensureTopLevelBlockIds();
+
+                let anchor = getSelectionAnchorCandidate();
+                if (anchor) updateLastFocusAnchor();
+
+                const explicitFocusExists = Boolean(explicitFocusId && getEditorDomElementById(explicitFocusId));
+                if (!explicitFocusExists && anchor && !anchor.elementId) {
+                    const tempAnchorId = addTemporaryAnchor(anchor);
+                    if (tempAnchorId) {
+                        if (String(tempAnchorId).startsWith(MOSS_TEMP_ANCHOR_PREFIX)) {
+                            request.tempAnchorId = tempAnchorId;
+                        }
+                        anchor = getSelectionAnchorCandidate() || anchor;
+                        updateLastFocusAnchor();
+                    }
+                }
+
+                request.focusElementId = explicitFocusExists
+                    ? explicitFocusId
+                    : (anchor?.elementId || lastFocusAnchor?.elementId || null);
+                request.focusBlockId = anchor?.blockId
+                    || lastFocusAnchor?.blockId
+                    || getTopLevelBlockIdForElementId(request.focusElementId)
+                    || null;
+
+                if (!request.focusElementId && request.focusBlockId) {
+                    request.focusElementId = request.focusBlockId;
+                }
+
+                contentHTML.value = tiptapEditor.getHTML();
+                request.canvasSnapshot = contentHTML.value;
+
+                if (request.focusElementId && !snapshotContainsId(request.canvasSnapshot, request.focusElementId)) {
+                    request.focusElementId = request.focusBlockId && snapshotContainsId(request.canvasSnapshot, request.focusBlockId)
+                        ? request.focusBlockId
+                        : null;
+                }
+                if (request.focusBlockId && !snapshotContainsId(request.canvasSnapshot, request.focusBlockId)) {
+                    request.focusBlockId = getTopLevelBlockIdForElementId(request.focusElementId);
+                }
+                if (!request.focusElementId && request.focusBlockId) {
+                    request.focusElementId = request.focusBlockId;
+                }
+
+                lastFocusAnchor = {
+                    elementId: request.focusElementId,
+                    blockId: request.focusBlockId,
+                    pos: anchor?.pos || lastFocusAnchor?.pos || tiptapEditor.state.selection.from
+                };
+
+                return request;
+            };
 
             const scrollToBottom = () => {
                 const container = document.getElementById('chat-container');
@@ -340,6 +627,8 @@
                     contentHTML.value = result.htmlContent;
                     documentTitle.value = result.filename || file.name;
                     tiptapEditor.commands.setContent(contentHTML.value);
+                    cleanupTemporaryAnchors();
+                    ensureTopLevelBlockIds();
                     messages.value.push({ role: 'ai', content: `已导入 ${documentTitle.value}。` });
                     await nextTick();
                     scrollToBottom();
@@ -413,10 +702,10 @@
             const submitAIPopup = () => {
                 if (!aiPopupInput.value.trim()) return;
                 const cmd = aiPopupInput.value.trim();
-                const focusId = getActiveElementId();
+                updateLastFocusAnchor();
                 closeAIPopup();
                 inputText.value = cmd;
-                sendMessage(focusId);
+                sendMessage();
             };
 
             const getActiveElementId = () => {
@@ -484,6 +773,7 @@
                 const doc = parser.parseFromString(`<div data-moss-root>${contentHTML.value}</div>`, 'text/html');
                 const root = doc.body.firstElementChild;
                 const target = findById(root, targetId);
+                const targetWasTopLevel = target?.parentElement === root;
 
                 if (!target && actionType !== 'insert') {
                     messages.value.push({ role: 'ai', content: `未找到目标节点：${targetId}` });
@@ -493,6 +783,10 @@
                 const holder = doc.createElement('div');
                 holder.innerHTML = newHTML;
                 const nodes = Array.from(holder.childNodes);
+                const replacementElements = nodes.filter(node => node.nodeType === window.Node.ELEMENT_NODE);
+                if (actionType === 'replace' && targetWasTopLevel && replacementElements.length && !replacementElements.some(node => node.id === targetId)) {
+                    replacementElements[0].id = targetId;
+                }
 
                 if (actionType === 'delete') {
                     target.remove();
@@ -512,6 +806,7 @@
 
                 contentHTML.value = root.innerHTML;
                 tiptapEditor.commands.setContent(contentHTML.value);
+                ensureTopLevelBlockIds();
 
                 await nextTick();
                 setTimeout(() => {
@@ -580,7 +875,7 @@
                 if (!inputText.value.trim() || isModifying.value) return;
 
                 const currentInput = inputText.value.trim();
-                const focusElementId = explicitFocusId || null;
+                let requestAnchors = null;
                 messages.value.push({ role: 'user', content: currentInput });
                 inputText.value = '';
                 await nextTick();
@@ -599,14 +894,16 @@
                 };
 
                 try {
+                    requestAnchors = prepareAgentRequestAnchors(explicitFocusId);
                     const response = await fetch(apiUrl('/api/v1/chat-stream'), {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             session_id: sessionId,
                             user_input: currentInput,
-                            focus_element_id: focusElementId,
-                            canvas_snapshot: contentHTML.value
+                            focus_element_id: requestAnchors.focusElementId,
+                            focus_block_id: requestAnchors.focusBlockId,
+                            canvas_snapshot: requestAnchors.canvasSnapshot
                         })
                     });
 
@@ -643,6 +940,10 @@
                     }
                     messages.value[aiIndex].content = `连接失败：${error.message}`;
                 } finally {
+                    if (requestAnchors?.tempAnchorId) {
+                        cleanupTemporaryAnchors(requestAnchors.tempAnchorId);
+                        ensureTopLevelBlockIds();
+                    }
                     isThinking.value = false;
                     isModifying.value = false;
                     await nextTick();
@@ -736,12 +1037,31 @@
                     editorProps: {
                         attributes: {
                             spellcheck: 'false',
+                        },
+                        handlePaste: () => {
+                            window.setTimeout(() => {
+                                ensureTopLevelBlockIds();
+                                updateLastFocusAnchor();
+                            }, 0);
+                            return false;
                         }
+                    },
+                    onSelectionUpdate: () => {
+                        updateLastFocusAnchor();
                     },
                     onUpdate: ({ editor }) => {
                         contentHTML.value = editor.getHTML();
+                        if (isMaintainingDocumentIds) return;
+                        const signature = topLevelStructureSignature();
+                        if (signature !== lastTopLevelSignature) {
+                            lastTopLevelSignature = signature;
+                            queueTopLevelIdMaintenance();
+                        }
                     }
                 });
+                cleanupTemporaryAnchors();
+                ensureTopLevelBlockIds();
+                refreshTopLevelSignature();
 
                 window.addEventListener('keydown', handleKeyDown);
                 window.addEventListener('resize', handleResize);

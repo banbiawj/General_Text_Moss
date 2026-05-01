@@ -25,6 +25,7 @@ class ChatRequest(BaseModel):
     session_id: str = Field(default_factory=lambda: f"session-{uuid4().hex}")
     user_input: str = ""
     focus_element_id: str | None = None
+    focus_block_id: str | None = None
     canvas_snapshot: str = ""
 
     message: str | None = None
@@ -87,4 +88,3 @@ class ExportDocumentRequest(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "ok"
     service: str = "moss-backend"
-

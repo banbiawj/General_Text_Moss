@@ -1,38 +1,88 @@
 from __future__ import annotations
 
 import operator
-from typing import Annotated, TypedDict
+from typing import Annotated, Literal, TypedDict
 
 from langchain_core.messages import BaseMessage
 
 
-class AgentState(TypedDict):
-    """单次 Agent 运行期间在 LangGraph 节点之间传递的状态对象。
+TaskType = Literal["general_chat", "document_qa", "local_edit", "global_edit"]
+TaskStatus = Literal["pending", "running", "done", "failed"]
 
-    每次 `/chat-stream` 请求都会创建一个新的 AgentState。LangGraph 会把
-    模型回复和工具执行结果追加到 `messages`，其余字段用于描述本轮请求
-    中由前端提交的文档上下文和定位信息。
+
+class AgentTask(TypedDict, total=False):
+    """Agent 本轮要处理的一个任务。
+
+    不管用户请求是普通聊天、文档问答、局部修改还是全文整理，最终都拆成
+    一个或多个局部任务。每个任务只暴露本任务需要的大模型上下文，不直接
+    暴露完整 canvas_snapshot。
+    """
+
+    # 任务唯一 ID，用于日志、调试、前端进度显示。
+    task_id: str
+
+    # 任务类型。全文任务会被拆成多个局部 task，但仍可标记为 global_edit。
+    task_type: TaskType
+
+    # 本任务允许进入大模型 prompt 的裁剪上下文。
+    # 注意：不是完整 canvas_snapshot。
+    canvas_context: str
+
+    # 基于任务意图生成的任务提示词。
+    # 例如：局部润色、文档问答、全文第 N 段整理等。
+    task_prompt: str
+
+    # 本任务允许调用的工具名。
+    # 例如：["search_document_blocks", "update_canvas_element"]。
+    task_tools: list[str]
+
+    # 本任务允许修改或引用为修改目标的元素 ID。
+    # update_canvas_element 必须校验 element_id 在这里。
+    allowed_element_ids: list[str]
+
+    # 任务状态，用于推进任务列表。
+    status: TaskStatus
+
+    # 可选：任务失败原因。
+    error: str
+
+
+class AgentState(TypedDict, total=False):
+    """单次 Agent 运行期间在 LangGraph 节点之间传递的简化状态。
+
+    状态只保存请求事实、工作记忆和任务队列。完整文档快照保留在
+    canvas_snapshot 中供后端内部解析和裁剪；真正进入大模型 prompt 的内容
+    应来自当前 AgentTask.canvas_context 与 AgentTask.task_prompt。
     """
 
     # 本轮图执行的消息轨迹。operator.add 作为 reducer，允许 LangGraph
     # 把每个节点返回的 AI 消息或工具消息追加到现有 messages 列表中。
     messages: Annotated[list[BaseMessage], operator.add]
 
-    # 前端编辑器发送的最新 HTML 快照。Agent 在本轮问答和文档修改规划中，
-    # 只能以它作为当前文档事实来源。
+    # 用户本轮输入的原始自然语言指令。
+    user_input: str
+
+    # 前端编辑器发送的完整 HTML 快照。它是后端内部的事实来源，用于任务规划、
+    # 上下文裁剪、检索和修改校验；不能原样塞进大模型 prompt。
     canvas_snapshot: str
 
-    # 当前光标或用户指令对应的精确锚点 ID，可能指向段落、列表项等嵌套节点。
-    # 该 ID 应当真实存在于 canvas_snapshot 中。
+    # 当前光标精确位置 ID，可能是嵌套节点。
     focus_element_id: str | None
 
-    # 包含 focus_element_id 的稳定顶层文档块 ID。用于上下文检索和编辑时的
-    # 块级兜底定位，避免只依赖嵌套锚点导致修改范围不清。
+    # 当前光标所属顶层块 ID。
     focus_block_id: str | None
 
-    # 前端会话 ID。当前会作为 LangGraph thread_id 和日志字段使用；
-    # 是否真正具备跨请求记忆，取决于后续是否接入 checkpointer。
+    # 本轮拆解出的任务列表。
+    # 普通聊天：1 个 task
+    # 文档问答：1 个或多个检索/问答 task
+    # 局部修改：通常 1 个 task
+    # 全文整理：多个局部 task
+    tasks: list[AgentTask]
+
+    # 当前正在处理的任务下标。
+    current_task_index: int
+
+    # 会话与日志字段，保留给后端运行时使用。
     session_id: str
 
-    # 单次请求 ID，用于关联本轮运行中的 LLM 输入输出日志。
     request_id: str

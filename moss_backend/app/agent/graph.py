@@ -1,21 +1,18 @@
 from __future__ import annotations
 
-import asyncio
-import html
 import json
-import re
 from collections.abc import AsyncIterator
 from functools import lru_cache
 from typing import Any
 from uuid import uuid4
 
+from langchain_core.prompts import load_prompt
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
 from pydantic import BaseModel, Field
 
-from app.agent.prompt import build_system_prompt
 from app.agent.state import AgentState, TaskType
 from app.core.config import get_settings
 from app.core.llm_logging import log_llm_messages
@@ -25,24 +22,7 @@ from app.tools.document_tools import DOCUMENT_TOOLS
 MutationEvent = dict[str, Any]
 
 
-INTENT_SYSTEM_PROMPT = """你是 Moss 文档助手的意图分类器。
 
-你只负责判断用户本轮请求属于哪一种任务类型，不要回答用户问题，不要改写文档，不要输出 HTML。
-
-任务类型：
-1. general_chat：普通聊天，不依赖当前文档内容，也不修改文档。
-2. document_qa：基于当前文档进行问答、总结、解释、提取信息，但不修改文档。
-3. local_edit：修改、润色、扩写、删除、插入、调整局部内容。只要用户没有明确要求全文/全部/整篇/整体/所有章节，就归为 local_edit。
-4. global_edit：明确要求对全文、全部、整篇、整体、所有章节进行编辑、整理、统一风格或批量修改。
-
-判断规则：
-- 有编辑动作词，但没有明确全局范围词，归为 local_edit。
-- 有编辑动作词，并且有全文/全部/整篇/整体/所有章节等范围词，归为 global_edit。
-- 询问、总结、解释、提取当前文档内容，归为 document_qa。
-- 不依赖文档的闲聊或通用写作建议，归为 general_chat。
-- 如果不确定是否全局编辑，默认 local_edit。
-- 如果不确定是否需要文档内容，默认 document_qa。
-"""
 
 
 class IntentDecision(BaseModel):
@@ -54,7 +34,7 @@ class IntentDecision(BaseModel):
 def get_graph():
     settings = get_settings()
     if not settings.llm_api_key:
-        raise RuntimeError("LLM_API_KEY is required when ENABLE_MOCK_LLM=false")
+        raise RuntimeError("LLM_API_KEY is required")
 
     intent_llm = ChatOpenAI(
         model=settings.llm_model,
@@ -73,9 +53,10 @@ def get_graph():
     ).bind_tools(DOCUMENT_TOOLS)
 
     async def intent_node(state: AgentState) -> dict[str, Any]:
+        intent_prompt =load_prompt("prompts/intent_prompt.yaml",encoding="utf-8")
         decision = await intent_llm.ainvoke(
             [
-                SystemMessage(content=INTENT_SYSTEM_PROMPT),
+                SystemMessage(content=intent_prompt.format()),
                 HumanMessage(
                     content=json.dumps(
                         {
@@ -94,6 +75,7 @@ def get_graph():
                 {
                     "task_id": uuid4().hex,
                     "task_type": decision.task_type,
+                    "task_reason":decision.reason,
                     "task_prompt": decision.reason,
                     "task_tools": _default_task_tools(decision.task_type),
                     "allowed_element_ids": [],
@@ -155,13 +137,6 @@ async def stream_agent_events(
     focus_block_id: str | None,
     canvas_snapshot: str,
 ) -> AsyncIterator[MutationEvent]:
-    settings = get_settings()
-
-    if settings.enable_mock_llm or not settings.llm_api_key:
-        async for event in _mock_stream(user_input, focus_element_id, focus_block_id, canvas_snapshot):
-            yield event
-        return
-
     initial_state: AgentState = {
         "messages": [HumanMessage(content=user_input)],
         "user_input": user_input,
@@ -199,54 +174,6 @@ async def stream_agent_events(
             }
 
 
-async def _mock_stream(
-    user_input: str,
-    focus_element_id: str | None,
-    focus_block_id: str | None,
-    canvas_snapshot: str,
-) -> AsyncIterator[MutationEvent]:
-    target_id = _select_target_id(focus_element_id, focus_block_id, canvas_snapshot)
-    wants_mutation = _looks_like_mutation(user_input)
-
-    if not wants_mutation:
-        reply = "我已经读取当前文档快照。当前处于本地 Mock 模式；配置真实大模型后，我会基于同一 SSE 协议进行上下文问答和文档修改。"
-        for chunk in _split_reply(reply):
-            await asyncio.sleep(0.02)
-            yield {"event": "chat_chunk", "data": {"content": chunk}}
-        return
-
-    action_type = "replace"
-    if any(word in user_input for word in ("删除", "移除", "删掉")):
-        action_type = "delete"
-        new_html = ""
-        reply = f"好的，已为你删除目标区块 `{target_id}`。"
-    elif any(word in user_input for word in ("追加", "新增", "插入", "补充")):
-        action_type = "append"
-        new_html = (
-            f'<p id="block-{html.escape(target_id)}-append">'
-            f"根据指令补充：{html.escape(user_input)}</p>"
-        )
-        reply = f"好的，已在 `{target_id}` 中追加一段内容。"
-    else:
-        new_html = _mock_rewrite_html(target_id, user_input)
-        reply = f"好的，已按你的指令更新 `{target_id}`。"
-
-    for chunk in _split_reply(reply):
-        await asyncio.sleep(0.02)
-        yield {"event": "chat_chunk", "data": {"content": chunk}}
-
-    await asyncio.sleep(0.05)
-    yield {
-        "event": "dom_mutation",
-        "data": {
-            "element_id": target_id,
-            "targetId": target_id,
-            "action_type": action_type,
-            "new_html": new_html,
-        },
-    }
-
-
 def _chunk_to_text(chunk: Any) -> str:
     content = getattr(chunk, "content", "")
     if isinstance(content, str):
@@ -278,51 +205,3 @@ def _default_task_tools(task_type: str) -> list[str]:
     return []
 
 
-def _looks_like_mutation(text: str) -> bool:
-    mutation_hints = (
-        "修改",
-        "优化",
-        "润色",
-        "改写",
-        "替换",
-        "调整",
-        "删除",
-        "移除",
-        "新增",
-        "追加",
-        "插入",
-        "精简",
-        "扩写",
-        "排版",
-    )
-    return any(hint in text for hint in mutation_hints)
-
-
-def _select_target_id(
-    focus_element_id: str | None,
-    focus_block_id: str | None,
-    canvas_snapshot: str,
-) -> str:
-    if focus_element_id:
-        return focus_element_id
-    if focus_block_id:
-        return focus_block_id
-    match = re.search(r'id=["\']([^"\']+)["\']', canvas_snapshot)
-    return match.group(1) if match else "demo-section"
-
-
-def _mock_rewrite_html(target_id: str, user_input: str) -> str:
-    safe_target = html.escape(target_id, quote=True)
-    safe_input = html.escape(user_input)
-    return (
-        f'<div id="{safe_target}" class="transition-colors duration-500 rounded-lg p-2 -mx-2 mt-4">'
-        "<h2>AI 协作更新</h2>"
-        f"<p>已根据指令整理此区块：{safe_input}</p>"
-        "<p>这是本地 Mock 模式生成的结构化 HTML。接入真实大模型后，"
-        "后端会继续通过相同的 dom_mutation 事件驱动前端局部更新。</p>"
-        "</div>"
-    )
-
-
-def _split_reply(reply: str) -> list[str]:
-    return [reply[index : index + 8] for index in range(0, len(reply), 8)]

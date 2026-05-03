@@ -23,6 +23,7 @@ class AgentTask(TypedDict, total=False):
 
     # 任务类型。全文任务会被拆成多个局部 task，但仍可标记为 global_edit。
     task_type: TaskType
+    task_reason:str
 
     # 本任务允许进入大模型 prompt 的裁剪上下文。
     # 注意：不是完整 canvas_snapshot。

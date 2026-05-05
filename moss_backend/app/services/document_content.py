@@ -22,7 +22,7 @@ def tailor_context(
 ) -> list[str]:
     """把完整画布 HTML 裁剪成适合进入模型上下文的片段列表。"""
     # 主要代码区------------------------------------------------------------------------------------
-    if task_type not in {"local_edit", "global_edit"}:
+    if task_type not in {"local_edit", "global_edit","document_qa"}:
         raise ValueError("task_type must be 'local_edit' or 'global_edit'")
 
     # 只抽取最外层 Moss 文档块，并保留每块原始 HTML。

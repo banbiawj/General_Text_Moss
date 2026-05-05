@@ -11,10 +11,19 @@ from langchain_core.prompts import load_prompt
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
-from app.agent.state import AgentState,AgentTask, TaskType
+from app.agent.state import AgentState, AgentTask, TaskType
 from app.core.config import get_settings
+from app.services.document_content import tailor_context
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+
+# 根据任务类型映射可用的工具列表
+TASK_TYPE_TOOLS: dict[TaskType, list[str]] = {
+    "general_chat": [],
+    "document_qa": ["search_document_blocks"],
+    "local_edit": ["search_document_blocks", "update_canvas_element"],
+    "global_edit": ["update_canvas_element"],
+}
 
 
 
@@ -57,12 +66,82 @@ def intent_node(state: AgentState) -> dict[str, Any]:
     }
 
 
+# ── Task Assemble Node ────────────────────────────────────────────────────
+
+
+def task_assemble_node(state: AgentState) -> dict[str, Any]:
+    """根据意图分类结果组装任务列表：裁剪上下文、获取工具列表、生成提示词。"""
+    task_type: TaskType = state.get("task_type", "general_chat")
+    canvas_snapshot = state.get("canvas_snapshot", "")
+    focus_block_id = state.get("focus_block_id")
+    focus_element_id = state.get("focus_element_id", "")
+    user_input = state.get("user_input", "")
+
+    # 1. 根据 task_type 获取允许的工具列表
+    task_tools = TASK_TYPE_TOOLS.get(task_type, [])
+
+    # 2. 根据 task_type 裁剪 canvas 上下文
+    if task_type == "general_chat":
+        context_chunks = [""]
+        prompt = load_prompt(
+        str(PROMPTS_DIR / "general_chat_prompt.yaml"), encoding="utf-8"
+        )
+    elif task_type == "document_qa":
+        # 文档问答需要完整的画布内容用于检索
+        tailored = tailor_context(canvas_snapshot, focus_block_id, task_type)
+        context_chunks = tailored if tailored else [""]
+        prompt = load_prompt(
+        str(PROMPTS_DIR / "document_qa_prompt.yaml"), encoding="utf-8"
+        )
+    elif task_type == "local_edit":
+        tailored = tailor_context(canvas_snapshot, focus_block_id, task_type)
+        context_chunks = tailored if tailored else [""]
+        prompt = load_prompt(
+        str(PROMPTS_DIR / "local_edit_prompt.yaml"), encoding="utf-8"
+        )
+    elif task_type == "glocal_edit":
+        tailored = tailor_context(canvas_snapshot, focus_block_id, task_type)
+        context_chunks = tailored if tailored else [""]
+        prompt = load_prompt(
+        str(PROMPTS_DIR / "glocal_edit_prompt.yaml"), encoding="utf-8"
+        )
+    else:
+        context_chunks = [""]
+
+    # 3. 加载提示词模板并组装 task_prompt
+
+
+    tasks: list[AgentTask] = []
+    for chunk in context_chunks:
+        task_prompt = prompt.format(
+            user_input=user_input,
+            canvas_context=chunk,
+            focus_element_id=focus_element_id or "",
+            focus_block_id=focus_block_id or "",
+            task_tools=str(task_tools),
+        )
+        task = AgentTask(
+            task_id=uuid4().hex,
+            task_message=[],
+            canvas_context=chunk,
+            task_prompt=task_prompt,
+            task_tools=task_tools,
+            allowed_element_ids=[],
+            status="pending",
+        )
+        tasks.append(task)
+
+    return {"tasks": tasks}
+
+
 # ── Graph Definition ─────────────────────────────────────────────────────
 
 builder = StateGraph(AgentState)
 builder.add_node("intent", intent_node)
+builder.add_node("task_assemble", task_assemble_node)
 builder.add_edge(START, "intent")
-builder.add_edge("intent", END)
+builder.add_edge("intent", "task_assemble")
+builder.add_edge("task_assemble", END)
 
 graph = builder.compile()
 
@@ -107,4 +186,12 @@ async def stream_agent_events(
             yield {
                 "event": "node_end",
                 "data": {"node": "intent", "output": output},
+            }
+        elif kind == "on_chain_start" and name == "task_assemble":
+            yield {"event": "node_start", "data": {"node": "task_assemble"}}
+        elif kind == "on_chain_end" and name == "task_assemble":
+            output = event.get("data", {}).get("output", {})
+            yield {
+                "event": "node_end",
+                "data": {"node": "task_assemble", "output": output},
             }

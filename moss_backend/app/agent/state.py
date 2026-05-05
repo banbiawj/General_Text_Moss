@@ -24,11 +24,6 @@ class AgentTask(TypedDict, total=False):
     # 只用于任务的处理的工作记忆
     task_message:Annotated[list[BaseMessage], operator.add]
 
-    # 任务类型。全文任务会被拆成多个局部 task，但仍可标记为 global_edit。
-    task_type: TaskType
-    skill_id: str
-    task_reason:str
-
     # 本任务允许进入大模型 prompt 的裁剪上下文。
     # 注意：不是完整 canvas_snapshot。
     canvas_context: str
@@ -76,6 +71,10 @@ class AgentState(TypedDict, total=False):
 
     # 当前光标所属顶层块 ID。
     focus_block_id: str | None
+
+    # 任务类型。全文任务会被拆成多个局部 task，但仍可标记为 global_edit。
+    task_type: TaskType
+    task_reason:str #判断原因，一句话
 
     # 本轮拆解出的任务列表。
     # 普通聊天：1 个 task

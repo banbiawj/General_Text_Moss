@@ -1,181 +1,110 @@
 from __future__ import annotations
 
-import json
-from collections.abc import AsyncIterator
-from functools import lru_cache
-from typing import Any
+from pathlib import Path
+from typing import Any, AsyncGenerator
 from uuid import uuid4
 
+import yaml
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
-from langgraph.graph import END, StateGraph
-from langgraph.prebuilt import ToolNode
+from langchain_core.prompts import load_prompt
+from langgraph.graph import END, START, StateGraph
+from pydantic import BaseModel, Field
 
-from app.agent.skill_runtime import (
-    build_skill_system_prompt,
-    build_task_from_skill,
-    load_skill_registry,
-    route_skill,
-)
-from app.agent.state import AgentState
+from app.agent.state import AgentState,AgentTask, TaskType
 from app.core.config import get_settings
-from app.core.llm_logging import log_llm_messages
-from app.tools.document_tools import DOCUMENT_TOOLS
+
+PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
 
-MutationEvent = dict[str, Any]
+
+# ── Intent Node ──────────────────────────────────────────────────────────
 
 
-@lru_cache
-def get_graph():
+class IntentOutput(BaseModel):
+    """Structured output from the intent classifier LLM."""
+
+    task_type: TaskType = Field(description="意图分类结果")
+    task_reason: str = Field(description="判断原因，一句话说明为什么归为该类别")
+
+
+def intent_node(state: AgentState) -> dict[str, Any]:
+    """Use LLM to classify user intent, then create a task in state.tasks."""
     settings = get_settings()
-    if not settings.llm_api_key:
-        raise RuntimeError("LLM_API_KEY is required")
+    system_prompt = load_prompt("prompts/intent_prompt.yaml",encoding="utf-8").format()
 
-    llm = ChatOpenAI(
-        model=settings.llm_model,
-        temperature=settings.llm_temperature,
-        api_key=settings.llm_api_key,
-        base_url=settings.llm_base_url,
-        streaming=True,
+
+    llm = (
+        ChatOpenAI(
+            api_key=settings.llm_api_key,
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
+            temperature=settings.llm_temperature,
+        )
+        .with_structured_output(IntentOutput)
     )
-    skill_registry = load_skill_registry()
-    tools_by_name = {tool.name: tool for tool in DOCUMENT_TOOLS}
 
-    async def intent_node(state: AgentState) -> dict[str, Any]:
-        selected_skill = route_skill(state.get("user_input", ""), skill_registry)
-        task = build_task_from_skill(
-            skill=selected_skill,
-            user_input=state.get("user_input", ""),
-            focus_block_id=state.get("focus_block_id"),
-            canvas_snapshot=state.get("canvas_snapshot", ""),
-        )
-        return {
-            "tasks": [task],
-            "current_task_index": 0,
-        }
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=state.get("user_input", "")),
+    ]
 
-    async def agent_node(state: AgentState) -> dict[str, list]:
-        task = _current_task(state)
-        system_prompt = build_skill_system_prompt(task)
-        llm_messages = [SystemMessage(content=system_prompt), *state["messages"]]
-        llm_call_id = uuid4().hex
-        log_llm_messages(
-            session_id=state["session_id"],
-            request_id=state["request_id"],
-            llm_call_id=llm_call_id,
-            direction="to_llm",
-            model=settings.llm_model,
-            messages=llm_messages,
-        )
-        allowed_tools = [tools_by_name[name] for name in task.get("task_tools", []) if name in tools_by_name]
-        runnable_llm = llm.bind_tools(allowed_tools) if allowed_tools else llm
-        response = await runnable_llm.ainvoke(llm_messages)
-        log_llm_messages(
-            session_id=state["session_id"],
-            request_id=state["request_id"],
-            llm_call_id=llm_call_id,
-            direction="from_llm",
-            model=settings.llm_model,
-            messages=[response],
-        )
-        return {"messages": [response]}
+    result: IntentOutput = llm.invoke(messages)
 
-    def should_continue(state: AgentState) -> str:
-        last_message = state["messages"][-1]
-        if getattr(last_message, "tool_calls", None):
-            return "tools"
-        return END
+    return {
+        "task_type": result.task_type,
+        "task_reason": result.task_reason,
+    }
 
-    builder = StateGraph(AgentState)
-    builder.add_node("intent", intent_node)
-    builder.add_node("agent", agent_node)
-    builder.add_node("tools", ToolNode(DOCUMENT_TOOLS))
-    builder.set_entry_point("intent")
-    builder.add_edge("intent", "agent")
-    builder.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
-    builder.add_edge("tools", "agent")
-    return builder.compile()
+
+# ── Graph Definition ─────────────────────────────────────────────────────
+
+builder = StateGraph(AgentState)
+builder.add_node("intent", intent_node)
+builder.add_edge(START, "intent")
+builder.add_edge("intent", END)
+
+graph = builder.compile()
+
+
+# ── Streaming Entrypoint ─────────────────────────────────────────────────
 
 
 async def stream_agent_events(
-    *,
     session_id: str,
     user_input: str,
     focus_element_id: str | None,
     focus_block_id: str | None,
     canvas_snapshot: str,
-) -> AsyncIterator[MutationEvent]:
-    initial_state: AgentState = {
-        "messages": [HumanMessage(content=user_input)],
+) -> AsyncGenerator[dict[str, Any], None]:
+    """Run the agent graph and yield SSE-compatible events.
+
+    Each yielded dict has the shape ``{"event": str, "data": dict}``,
+    which the caller (routes.py) serialises into an SSE frame.
+    """
+    initial_state: dict[str, Any] = {
+        "messages": [],
         "user_input": user_input,
         "canvas_snapshot": canvas_snapshot,
         "focus_element_id": focus_element_id,
         "focus_block_id": focus_block_id,
+        "task_type": "general_chat",
+        "task_reason": "",
         "tasks": [],
         "current_task_index": 0,
         "session_id": session_id,
         "request_id": uuid4().hex,
     }
-    graph = get_graph()
-    config = {"configurable": {"thread_id": session_id}}
 
-    async for raw_event in graph.astream_events(initial_state, config=config, version="v2"):
-        event_name = raw_event.get("event")
-        node_name = raw_event.get("name")
-        data = raw_event.get("data", {})
+    async for event in graph.astream_events(initial_state, version="v2"):
+        kind = event["event"]
+        name = event.get("name", "")
 
-        if event_name == "on_chat_model_stream":
-            content = _chunk_to_text(data.get("chunk"))
-            if content:
-                yield {"event": "chat_chunk", "data": {"content": content}}
-
-        if event_name == "on_tool_start" and node_name == "update_canvas_element":
-            tool_input = _coerce_tool_input(data.get("input"))
+        if kind == "on_chain_start" and name == "intent":
+            yield {"event": "node_start", "data": {"node": "intent"}}
+        elif kind == "on_chain_end" and name == "intent":
+            output = event.get("data", {}).get("output", {})
             yield {
-                "event": "dom_mutation",
-                "data": {
-                    "element_id": tool_input.get("element_id"),
-                    "targetId": tool_input.get("element_id"),
-                    "action_type": tool_input.get("action_type", "replace"),
-                    "new_html": tool_input.get("new_html", ""),
-                },
+                "event": "node_end",
+                "data": {"node": "intent", "output": output},
             }
-
-
-def _chunk_to_text(chunk: Any) -> str:
-    content = getattr(chunk, "content", "")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "".join(part.get("text", "") for part in content if isinstance(part, dict))
-    return ""
-
-
-def _coerce_tool_input(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-            return parsed if isinstance(parsed, dict) else {}
-        except json.JSONDecodeError:
-            return {}
-    return {}
-
-
-def _current_task(state: AgentState) -> dict[str, Any]:
-    tasks = state.get("tasks") or []
-    current_index = int(state.get("current_task_index") or 0)
-    if not tasks or current_index >= len(tasks):
-        return {
-            "skill_id": "general-chat",
-            "task_type": "general_chat",
-            "task_prompt": "Answer the user directly.",
-            "task_tools": [],
-            "canvas_context": "",
-            "allowed_element_ids": [],
-        }
-    return tasks[current_index]
-
-

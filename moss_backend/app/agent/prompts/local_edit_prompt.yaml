@@ -1,5 +1,6 @@
 _type:"prompt"
-input_variables:[]
+当前用户的光标位于当前文本的{focus_element_id}处，位于{focus_block_id}中
+input_variables:[user_input,canvas_context,focus_element_id,task_tools]
 template:"
 你是 Moss 文档助手。
 你现在在负责处理，文段的局部处理任务

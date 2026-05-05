@@ -1,145 +1,74 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-
-from app.agent.document_context import (
-    build_context_update,
-    classify_intent,
-    mark_global_batch_processed,
-    search_document_blocks,
-    update_authorization_after_retrieval,
-    validate_canvas_mutation,
+from app.agent.skill_runtime import (
+    build_skill_system_prompt,
+    build_task_from_skill,
+    load_skill_registry,
+    route_skill,
 )
-from app.agent.graph import _visible_conversation_messages
-from app.agent.prompt import build_system_prompt
 
 
 class AgentRefactorTests(unittest.TestCase):
-    def test_intent_classification(self) -> None:
-        self.assertEqual(classify_intent("你好")[0], "general_chat")
-        self.assertEqual(classify_intent("总结项目经历")[0], "document_qa")
-        self.assertEqual(classify_intent("润色这段", "moss-block-1")[0], "local_edit")
-        self.assertEqual(classify_intent("全文统一风格")[0], "global_edit")
+    def test_skill_routing_keeps_original_coarse_task_types(self) -> None:
+        registry = load_skill_registry()
 
-    def test_document_qa_context_does_not_include_full_snapshot(self) -> None:
+        self.assertEqual(route_skill("你好", registry).task_type, "general_chat")
+        self.assertEqual(route_skill("总结项目经历", registry).task_type, "document_qa")
+        self.assertEqual(route_skill("润色这段", registry).task_type, "local_edit")
+        self.assertEqual(route_skill("全文统一风格", registry).task_type, "global_edit")
+
+    def test_local_edit_prompt_uses_focus_context_not_full_snapshot(self) -> None:
+        registry = load_skill_registry()
+        skill = route_skill("润色这段", registry)
         snapshot = (
-            '<h1 id="moss-block-1">标题</h1>'
-            '<p id="moss-block-2">项目经历 Python 后端</p>'
-            '<p id="moss-block-3">教育经历</p>'
-        )
-        state = {
-            "messages": [HumanMessage(content="总结项目经历")],
-            "canvas_snapshot": snapshot,
-            "focus_element_id": "moss-block-2",
-            "focus_block_id": "moss-block-2",
-            "intent": "document_qa",
-            "intent_reason": "test",
-            "retrieved_block_ids": [],
-        }
-
-        context_update = build_context_update(state)
-        prompt = build_system_prompt(
-            intent="document_qa",
-            intent_reason="test",
-            canvas_context=context_update["canvas_context"],
-            allowed_element_ids=context_update["allowed_element_ids"],
+            '<p id="moss-block-0">before</p>'
+            '<p id="moss-block-1">target</p>'
+            '<p id="moss-block-2">after</p>'
+            '<p id="moss-block-3">outside</p>'
+            '<p id="moss-block-4">outside</p>'
+            '<p id="moss-block-5">outside</p>'
         )
 
-        self.assertNotIn(snapshot, prompt)
+        task = build_task_from_skill(
+            skill=skill,
+            user_input="润色这段",
+            focus_block_id="moss-block-1",
+            canvas_snapshot=snapshot,
+        )
+        prompt = build_skill_system_prompt(task)
+
+        self.assertIn('id="moss-block-1"', prompt)
         self.assertNotIn("canvas_snapshot", prompt)
-        self.assertIn("Document outline", prompt)
-        self.assertIn("Focus block brief", prompt)
+        self.assertEqual(task["allowed_element_ids"], ["moss-block-1"])
 
-    def test_search_authorizes_returned_block_ids_only(self) -> None:
-        snapshot = (
-            '<p id="moss-block-1">项目经历 Python 后端</p>'
-            '<p id="moss-block-2">教育经历</p>'
-            '<p id="moss-block-3">技能栈</p>'
-        )
-        state = {
-            "canvas_snapshot": snapshot,
-            "intent": "document_qa",
-            "intent_reason": "test",
-            "retrieved_block_ids": [],
-        }
-        context_update = build_context_update(state)
-        result = search_document_blocks({**state, **context_update}, "Python", 5)
-        auth_update = update_authorization_after_retrieval({**state, **context_update}, result, "Python", 5)
+    def test_global_edit_authorizes_current_batch_ids(self) -> None:
+        registry = load_skill_registry()
+        skill = route_skill("全文统一风格", registry)
+        snapshot = "".join(f'<p id="moss-block-{index}">block {index}</p>' for index in range(5))
 
-        self.assertEqual([block["block_id"] for block in result["blocks"]], ["moss-block-1"])
-        self.assertEqual(auth_update["retrieved_block_ids"], ["moss-block-1"])
-        self.assertEqual(auth_update["allowed_element_ids"], ["moss-block-1"])
-
-    def test_mutation_validation_requires_authorization_and_target_id(self) -> None:
-        state = {"allowed_element_ids": ["moss-block-1"]}
-
-        self.assertIsNone(
-            validate_canvas_mutation(
-                state,
-                element_id="moss-block-1",
-                action_type="replace",
-                new_html='<p id="moss-block-1">ok</p>',
-            )
-        )
-        self.assertIn(
-            "preserve target id",
-            validate_canvas_mutation(
-                state,
-                element_id="moss-block-1",
-                action_type="replace",
-                new_html="<p>missing id</p>",
-            ),
-        )
-        self.assertIn(
-            "not authorized",
-            validate_canvas_mutation(
-                state,
-                element_id="moss-block-2",
-                action_type="delete",
-                new_html="",
-            ),
+        task = build_task_from_skill(
+            skill=skill,
+            user_input="全文统一风格",
+            focus_block_id=None,
+            canvas_snapshot=snapshot,
         )
 
-    def test_global_batch_window_drops_previous_batch_tool_history(self) -> None:
-        snapshot = "".join(f'<p id="moss-block-{index}">block {index}</p>' for index in range(3))
-        state = {
-            "messages": [HumanMessage(content="全文润色")],
-            "canvas_snapshot": snapshot,
-            "intent": "global_edit",
-            "intent_reason": "test",
-            "retrieved_block_ids": [],
-        }
-        first_context = build_context_update(state)
-        self.assertEqual(first_context["current_batch_ids"], ["moss-block-0"])
+        self.assertEqual(
+            task["allowed_element_ids"],
+            ["moss-block-0", "moss-block-1", "moss-block-2", "moss-block-3"],
+        )
+        self.assertNotIn('id="moss-block-4"', task["canvas_context"])
 
-        messages = [
-            HumanMessage(content="全文润色"),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "update_canvas_element",
-                        "args": {
-                            "element_id": "moss-block-0",
-                            "action_type": "replace",
-                            "new_html": '<p id="moss-block-0">updated</p>',
-                        },
-                        "id": "tool-1",
-                    }
-                ],
-            ),
-            ToolMessage(content="ok", tool_call_id="tool-1"),
-        ]
-        advanced_state = {**state, **first_context, "messages": messages}
-        advanced_state.update(mark_global_batch_processed(advanced_state, ["moss-block-0"]))
-        second_context = build_context_update(advanced_state)
-        visible = _visible_conversation_messages({**advanced_state, **second_context, "messages": messages})
+    def test_graph_uses_skill_runtime_instead_of_hard_coded_tool_mapping(self) -> None:
+        graph_source = (Path(__file__).parents[1] / "app" / "agent" / "graph.py").read_text(encoding="utf-8")
 
-        self.assertEqual(second_context["current_batch_ids"], ["moss-block-1"])
-        self.assertEqual(len(visible), 1)
-        self.assertIsInstance(visible[0], HumanMessage)
+        self.assertIn("route_skill", graph_source)
+        self.assertIn("build_task_from_skill", graph_source)
+        self.assertNotIn("IntentDecision", graph_source)
+        self.assertNotIn("_default_task_tools", graph_source)
 
 
 if __name__ == "__main__":

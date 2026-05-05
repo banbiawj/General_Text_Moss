@@ -21,8 +21,12 @@ class AgentTask(TypedDict, total=False):
     # 任务唯一 ID，用于日志、调试、前端进度显示。
     task_id: str
 
+    # 只用于任务的处理的工作记忆
+    task_message:Annotated[list[BaseMessage], operator.add]
+
     # 任务类型。全文任务会被拆成多个局部 task，但仍可标记为 global_edit。
     task_type: TaskType
+    skill_id: str
     task_reason:str
 
     # 本任务允许进入大模型 prompt 的裁剪上下文。

@@ -6,14 +6,18 @@ from functools import lru_cache
 from typing import Any
 from uuid import uuid4
 
-from langchain_core.prompts import load_prompt
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
-from pydantic import BaseModel, Field
 
-from app.agent.state import AgentState, TaskType
+from app.agent.skill_runtime import (
+    build_skill_system_prompt,
+    build_task_from_skill,
+    load_skill_registry,
+    route_skill,
+)
+from app.agent.state import AgentState
 from app.core.config import get_settings
 from app.core.llm_logging import log_llm_messages
 from app.tools.document_tools import DOCUMENT_TOOLS
@@ -22,27 +26,11 @@ from app.tools.document_tools import DOCUMENT_TOOLS
 MutationEvent = dict[str, Any]
 
 
-
-
-
-class IntentDecision(BaseModel):
-    task_type: TaskType = Field(description="用户本轮请求的任务类型")
-    reason: str = Field(description="一句话说明分类原因")
-
-
 @lru_cache
 def get_graph():
     settings = get_settings()
     if not settings.llm_api_key:
         raise RuntimeError("LLM_API_KEY is required")
-
-    intent_llm = ChatOpenAI(
-        model=settings.llm_model,
-        temperature=0,
-        api_key=settings.llm_api_key,
-        base_url=settings.llm_base_url,
-        streaming=False,
-    ).with_structured_output(IntentDecision)
 
     llm = ChatOpenAI(
         model=settings.llm_model,
@@ -50,47 +38,26 @@ def get_graph():
         api_key=settings.llm_api_key,
         base_url=settings.llm_base_url,
         streaming=True,
-    ).bind_tools(DOCUMENT_TOOLS)
+    )
+    skill_registry = load_skill_registry()
+    tools_by_name = {tool.name: tool for tool in DOCUMENT_TOOLS}
 
     async def intent_node(state: AgentState) -> dict[str, Any]:
-        intent_prompt =load_prompt("prompts/intent_prompt.yaml",encoding="utf-8")
-        decision = await intent_llm.ainvoke(
-            [
-                SystemMessage(content=intent_prompt.format()),
-                HumanMessage(
-                    content=json.dumps(
-                        {
-                            "user_input": state.get("user_input", ""),
-                            "has_document": bool(state.get("canvas_snapshot", "").strip()),
-                            "has_focus_element": bool(state.get("focus_element_id")),
-                            "has_focus_block": bool(state.get("focus_block_id")),
-                        },
-                        ensure_ascii=False,
-                    )
-                ),
-            ]
+        selected_skill = route_skill(state.get("user_input", ""), skill_registry)
+        task = build_task_from_skill(
+            skill=selected_skill,
+            user_input=state.get("user_input", ""),
+            focus_block_id=state.get("focus_block_id"),
+            canvas_snapshot=state.get("canvas_snapshot", ""),
         )
         return {
-            "tasks": [
-                {
-                    "task_id": uuid4().hex,
-                    "task_type": decision.task_type,
-                    "task_reason":decision.reason,
-                    "task_prompt": decision.reason,
-                    "task_tools": _default_task_tools(decision.task_type),
-                    "allowed_element_ids": [],
-                    "status": "pending",
-                }
-            ],
+            "tasks": [task],
             "current_task_index": 0,
         }
 
     async def agent_node(state: AgentState) -> dict[str, list]:
-        system_prompt = build_system_prompt(
-            canvas_snapshot=state["canvas_snapshot"],
-            focus_element_id=state.get("focus_element_id"),
-            focus_block_id=state.get("focus_block_id"),
-        )
+        task = _current_task(state)
+        system_prompt = build_skill_system_prompt(task)
         llm_messages = [SystemMessage(content=system_prompt), *state["messages"]]
         llm_call_id = uuid4().hex
         log_llm_messages(
@@ -101,7 +68,9 @@ def get_graph():
             model=settings.llm_model,
             messages=llm_messages,
         )
-        response = await llm.ainvoke(llm_messages)
+        allowed_tools = [tools_by_name[name] for name in task.get("task_tools", []) if name in tools_by_name]
+        runnable_llm = llm.bind_tools(allowed_tools) if allowed_tools else llm
+        response = await runnable_llm.ainvoke(llm_messages)
         log_llm_messages(
             session_id=state["session_id"],
             request_id=state["request_id"],
@@ -195,13 +164,18 @@ def _coerce_tool_input(value: Any) -> dict[str, Any]:
     return {}
 
 
-def _default_task_tools(task_type: str) -> list[str]:
-    if task_type == "general_chat":
-        return []
-    if task_type == "document_qa":
-        return ["search_document_blocks"]
-    if task_type in {"local_edit", "global_edit"}:
-        return ["search_document_blocks", "update_canvas_element"]
-    return []
+def _current_task(state: AgentState) -> dict[str, Any]:
+    tasks = state.get("tasks") or []
+    current_index = int(state.get("current_task_index") or 0)
+    if not tasks or current_index >= len(tasks):
+        return {
+            "skill_id": "general-chat",
+            "task_type": "general_chat",
+            "task_prompt": "Answer the user directly.",
+            "task_tools": [],
+            "canvas_context": "",
+            "allowed_element_ids": [],
+        }
+    return tasks[current_index]
 
 

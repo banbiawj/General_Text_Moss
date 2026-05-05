@@ -8,12 +8,15 @@ import yaml
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import load_prompt
+from langgraph.prebuilt import ToolNode
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
 from app.agent.state import AgentState, AgentTask, TaskType
 from app.core.config import get_settings
 from app.services.document_content import tailor_context
+from app.tools.document_tools import DOCUMENT_TOOLS
+
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
@@ -99,14 +102,17 @@ def task_assemble_node(state: AgentState) -> dict[str, Any]:
         prompt = load_prompt(
         str(PROMPTS_DIR / "local_edit_prompt.yaml"), encoding="utf-8"
         )
-    elif task_type == "glocal_edit":
+    elif task_type == "global_edit":
         tailored = tailor_context(canvas_snapshot, focus_block_id, task_type)
         context_chunks = tailored if tailored else [""]
         prompt = load_prompt(
-        str(PROMPTS_DIR / "glocal_edit_prompt.yaml"), encoding="utf-8"
+        str(PROMPTS_DIR / "global_edit_prompt.yaml"), encoding="utf-8"
         )
     else:
         context_chunks = [""]
+        prompt = load_prompt(
+        str(PROMPTS_DIR / "general_chat_prompt.yaml"), encoding="utf-8"
+        )
 
     # 3. 加载提示词模板并组装 task_prompt
 
@@ -139,6 +145,7 @@ def task_assemble_node(state: AgentState) -> dict[str, Any]:
 builder = StateGraph(AgentState)
 builder.add_node("intent", intent_node)
 builder.add_node("task_assemble", task_assemble_node)
+builder.add_node("tools", ToolNode(DOCUMENT_TOOLS))
 builder.add_edge(START, "intent")
 builder.add_edge("intent", "task_assemble")
 builder.add_edge("task_assemble", END)

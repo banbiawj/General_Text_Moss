@@ -6,7 +6,7 @@ from typing import Literal
 
 
 MOSS_BLOCK_ID_PREFIX = "moss-block-"
-TailorContextTaskType = Literal["local_edit", "global_edit"]
+TailorContextTaskType = Literal["local_edit", "global_edit", "document_qa"]
 
 
 @dataclass(frozen=True)

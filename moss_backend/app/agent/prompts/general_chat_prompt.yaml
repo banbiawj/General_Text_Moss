@@ -3,5 +3,7 @@ input_variables: [user_input, canvas_context, focus_element_id, focus_block_id, 
 template: "
 你是 Moss 文档助手。
 现在是正常的聊天行为，正常回答用户即可
+以下是用户输入：
+{user_input}
 
 "

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import docx; print\\('docx OK'\\)\")",
+      "Bash(/c/python/python.exe -c ' *)"
+    ]
+  }
+}

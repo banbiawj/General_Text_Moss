@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/c/python/python.exe -c ' *)",
+      "Bash(uvicorn app.main:app --host 127.0.0.1 --port 8000)",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/v1/chat-stream -H \"Content-Type: application/json\" -d \"{\\\\\"user_input\\\\\":\\\\\"hello\\\\\",\\\\\"canvas_snapshot\\\\\":\\\\\"\\\\\",\\\\\"session_id\\\\\":\\\\\"test-1\\\\\"}\")",
+      "Bash(curl -s http://127.0.0.1:8000/)",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/v1/health)",
+      "Bash(curl -s -X GET http://127.0.0.1:8000/api/v1/health)",
+      "Bash(echo \"Hello World\")",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/v1/upload -F \"file=@/tmp/test-upload.txt\")",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/document/export -H \"Content-Type: application/json\" -d \"{\\\\\"format\\\\\":\\\\\"markdown\\\\\",\\\\\"content\\\\\":\\\\\"<p>Hello</p>\\\\\",\\\\\"filename\\\\\":\\\\\"test\\\\\"}\")",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/document/save -H \"Content-Type: application/json\" -d \"{\\\\\"content\\\\\":\\\\\"<p>test</p>\\\\\",\\\\\"docId\\\\\":\\\\\"doc-test\\\\\"}\")",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/v1/chat-stream -H \"Content-Type: application/json\" -d \"{\\\\\"user_input\\\\\":\\\\\"总结一下这份文档说了什么\\\\\",\\\\\"canvas_snapshot\\\\\":\\\\\"<div id=\\\\\\\\\\\\\"moss-block-1\\\\\\\\\\\\\"><p>这是一份关于人工智能的报告。AI正在改变世界。</p></div>\\\\\",\\\\\"session_id\\\\\":\\\\\"test-2\\\\\"}\")"
+    ]
+  }
+}

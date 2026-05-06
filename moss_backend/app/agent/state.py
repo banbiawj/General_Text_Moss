@@ -86,6 +86,11 @@ class AgentState(TypedDict, total=False):
     # 当前正在处理的任务下标。
     current_task_index: int
 
+    # 待发送到前端的 DOM 变更指令队列。
+    # tools_node 在调用 update_canvas_element 时追加到此列表，
+    # stream_agent_events 将其作为 dom_mutation SSE 事件发送后清空。
+    pending_mutations: list[dict]
+
     # 会话与日志字段，保留给后端运行时使用。
     session_id: str
 

@@ -49,6 +49,14 @@ class Settings(BaseSettings):
     llm_log_file: Path = Field(default=Path("logs") / "llm_messages.jsonl", alias="LLM_LOG_FILE")
 
     storage_dir: Path = Field(default=Path("storage"), alias="STORAGE_DIR")
+    conversation_metadata_db: Path | None = Field(
+        default=None,
+        alias="CONVERSATION_METADATA_DB",
+    )
+    langgraph_checkpoint_db: Path | None = Field(
+        default=None,
+        alias="LANGGRAPH_CHECKPOINT_DB",
+    )
 
     @property
     def allowed_cors_origins(self) -> list[str]:
@@ -59,6 +67,22 @@ class Settings(BaseSettings):
             parsed = json.loads(value)
             return [str(item).strip() for item in parsed if str(item).strip()]
         return [item.strip() for item in value.split(",") if item.strip()]
+
+    @property
+    def conversation_metadata_path(self) -> Path:
+        return self._storage_path(self.conversation_metadata_db, "conversations.sqlite3")
+
+    @property
+    def langgraph_checkpoint_path(self) -> Path:
+        return self._storage_path(
+            self.langgraph_checkpoint_db,
+            "langgraph_checkpoints.sqlite3",
+        )
+
+    def _storage_path(self, configured: Path | None, filename: str) -> Path:
+        if configured is not None:
+            return configured
+        return self.storage_dir / filename
 
 
 @lru_cache

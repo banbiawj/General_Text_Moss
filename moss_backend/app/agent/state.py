@@ -93,5 +93,6 @@ class AgentState(TypedDict, total=False):
 
     # 会话与日志字段，保留给后端运行时使用。
     session_id: str
+    conversation_id: str
 
     request_id: str

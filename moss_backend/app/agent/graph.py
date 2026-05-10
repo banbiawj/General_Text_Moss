@@ -20,6 +20,21 @@ from app.tools.document_tools import DOCUMENT_TOOLS
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
 
+def _ensure_langchain_legacy_debug_attr() -> None:
+    try:
+        import langchain
+    except ImportError:
+        return
+
+    defaults = {"debug": False, "verbose": False, "llm_cache": None}
+    for attr, value in defaults.items():
+        if not hasattr(langchain, attr):
+            setattr(langchain, attr, value)
+
+
+_ensure_langchain_legacy_debug_attr()
+
+
 def _load_prompt_template(filepath: str | Path) -> PromptTemplate:
     """Load a PromptTemplate from a YAML prompt file (safe replacement for deprecated load_prompt)."""
     path = Path(filepath)
@@ -160,6 +175,19 @@ def task_assemble_node(state: AgentState) -> dict[str, Any]:
 # ── Execute Node (ReAct) ─────────────────────────────────────────────────
 
 
+MAX_CONVERSATION_HISTORY_MESSAGES = 8
+
+
+def _build_execute_messages(
+    *,
+    system_prompt: str,
+    conversation_messages: list[Any],
+    task_messages: list[Any],
+) -> list[Any]:
+    bounded_history = conversation_messages[-MAX_CONVERSATION_HISTORY_MESSAGES:]
+    return [SystemMessage(content=system_prompt)] + bounded_history + task_messages
+
+
 def execute_node(state: AgentState) -> dict[str, Any]:
     """Execute the current task via LLM with optional tool calling (ReAct).
 
@@ -195,7 +223,12 @@ def execute_node(state: AgentState) -> dict[str, Any]:
         llm = llm.bind_tools(tools)
 
     task_messages = list(task.get("task_message", []))
-    messages = [SystemMessage(content=task["task_prompt"])] + task_messages
+    conversation_messages = list(state.get("messages", []))
+    messages = _build_execute_messages(
+        system_prompt=task["task_prompt"],
+        conversation_messages=conversation_messages,
+        task_messages=task_messages,
+    )
 
     response = llm.invoke(messages)
 
@@ -322,7 +355,11 @@ builder.add_conditional_edges(
     {"execute": "execute", END: END},
 )
 
-graph = builder.compile()
+def compile_agent_graph(checkpointer: Any | None = None) -> Any:
+    return builder.compile(checkpointer=checkpointer)
+
+
+graph = compile_agent_graph()
 
 
 # ── Streaming Entrypoint ─────────────────────────────────────────────────
@@ -347,10 +384,12 @@ def _sanitize_output(output: Any) -> Any:
 
 async def stream_agent_events(
     session_id: str,
+    conversation_id: str,
     user_input: str,
     focus_element_id: str | None,
     focus_block_id: str | None,
     canvas_snapshot: str,
+    compiled_graph: Any | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Run the agent graph and yield SSE-compatible events.
 
@@ -358,7 +397,7 @@ async def stream_agent_events(
     which the caller (routes.py) serialises into an SSE frame.
     """
     initial_state: dict[str, Any] = {
-        "messages": [],
+        "messages": [HumanMessage(content=user_input)],
         "user_input": user_input,
         "canvas_snapshot": canvas_snapshot,
         "focus_element_id": focus_element_id,
@@ -369,10 +408,18 @@ async def stream_agent_events(
         "current_task_index": 0,
         "pending_mutations": [],
         "session_id": session_id,
+        "conversation_id": conversation_id,
         "request_id": uuid4().hex,
     }
 
-    async for event in graph.astream_events(initial_state, version="v2"):
+    runtime_graph = compiled_graph or graph
+    config = {"configurable": {"thread_id": conversation_id}}
+
+    async for event in runtime_graph.astream_events(
+        initial_state,
+        config=config,
+        version="v2",
+    ):
         kind = event["event"]
         name = event.get("name", "")
 

@@ -1,0 +1,179 @@
+from __future__ import annotations
+
+import shutil
+import unittest
+import os
+from pathlib import Path
+from typing import Any, AsyncGenerator
+from uuid import uuid4
+
+from langchain_core.messages import BaseMessage, HumanMessage
+
+from app.agent.checkpointing import open_sqlite_checkpointer
+from app.core.config import get_settings
+from app.agent.graph import (
+    _build_execute_messages,
+    compile_agent_graph,
+    stream_agent_events,
+)
+
+
+class FakeCompiledGraph:
+    def __init__(self) -> None:
+        self.captured_initial_state: dict[str, Any] | None = None
+        self.captured_config: dict[str, Any] | None = None
+
+    async def astream_events(
+        self,
+        initial_state: dict[str, Any],
+        *,
+        config: dict[str, Any],
+        version: str,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        self.captured_initial_state = initial_state
+        self.captured_config = config
+        yield {
+            "event": "on_chain_start",
+            "name": "intent",
+            "data": {},
+        }
+
+
+async def drain_events(generator: AsyncGenerator[dict[str, Any], None]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    async for event in generator:
+        events.append(event)
+    return events
+
+
+class GraphThreadingTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.original_enable_mock_llm = os.environ.get("ENABLE_MOCK_LLM")
+        os.environ["ENABLE_MOCK_LLM"] = "true"
+        get_settings.cache_clear()
+
+    def tearDown(self) -> None:
+        if self.original_enable_mock_llm is None:
+            os.environ.pop("ENABLE_MOCK_LLM", None)
+        else:
+            os.environ["ENABLE_MOCK_LLM"] = self.original_enable_mock_llm
+        get_settings.cache_clear()
+
+    def make_temp_dir(self) -> Path:
+        temp_dir = Path.cwd() / ".tmp" / "tests" / f"graph-threading-{uuid4().hex}"
+        temp_dir.mkdir(parents=True)
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        return temp_dir
+
+    async def test_stream_agent_events_uses_conversation_id_as_thread_id(self) -> None:
+        fake_graph = FakeCompiledGraph()
+
+        await drain_events(
+            stream_agent_events(
+                session_id="session-a",
+                conversation_id="conv-thread123",
+                user_input="hello",
+                focus_element_id=None,
+                focus_block_id=None,
+                canvas_snapshot="",
+                compiled_graph=fake_graph,
+            )
+        )
+
+        self.assertEqual(
+            fake_graph.captured_config,
+            {"configurable": {"thread_id": "conv-thread123"}},
+        )
+        self.assertIsNotNone(fake_graph.captured_initial_state)
+        messages = fake_graph.captured_initial_state["messages"]
+        self.assertEqual(len(messages), 1)
+        self.assertIsInstance(messages[0], HumanMessage)
+        self.assertEqual(messages[0].content, "hello")
+        self.assertEqual(
+            fake_graph.captured_initial_state["conversation_id"],
+            "conv-thread123",
+        )
+
+    async def test_same_conversation_persists_messages_and_different_conversation_isolated(self) -> None:
+        temp_dir = self.make_temp_dir()
+        db_path = temp_dir / "checkpoints.sqlite3"
+        async with open_sqlite_checkpointer(db_path) as saver:
+            compiled_graph = compile_agent_graph(checkpointer=saver)
+            same_config = {"configurable": {"thread_id": "conv-same1234"}}
+            other_config = {"configurable": {"thread_id": "conv-other123"}}
+
+            await drain_events(
+                stream_agent_events(
+                    session_id="session-a",
+                    conversation_id="conv-same1234",
+                    user_input="first turn",
+                    focus_element_id=None,
+                    focus_block_id=None,
+                    canvas_snapshot="",
+                    compiled_graph=compiled_graph,
+                )
+            )
+            await drain_events(
+                stream_agent_events(
+                    session_id="session-b",
+                    conversation_id="conv-same1234",
+                    user_input="second turn",
+                    focus_element_id=None,
+                    focus_block_id=None,
+                    canvas_snapshot="",
+                    compiled_graph=compiled_graph,
+                )
+            )
+            await drain_events(
+                stream_agent_events(
+                    session_id="session-c",
+                    conversation_id="conv-other123",
+                    user_input="isolated turn",
+                    focus_element_id=None,
+                    focus_block_id=None,
+                    canvas_snapshot="",
+                    compiled_graph=compiled_graph,
+                )
+            )
+
+            same_state = await compiled_graph.aget_state(same_config)
+            other_state = await compiled_graph.aget_state(other_config)
+
+        same_contents = [
+            str(message.content)
+            for message in same_state.values["messages"]
+            if isinstance(message, BaseMessage)
+        ]
+        other_contents = [
+            str(message.content)
+            for message in other_state.values["messages"]
+            if isinstance(message, BaseMessage)
+        ]
+
+        self.assertIn("first turn", same_contents)
+        self.assertIn("second turn", same_contents)
+        self.assertNotIn("isolated turn", same_contents)
+        self.assertIn("isolated turn", other_contents)
+        self.assertNotIn("first turn", other_contents)
+
+    def test_execute_messages_include_bounded_conversation_history(self) -> None:
+        history = [HumanMessage(content=f"history {index}") for index in range(10)]
+        task_messages = [HumanMessage(content="task-local")]
+
+        messages = _build_execute_messages(
+            system_prompt="system",
+            conversation_messages=history,
+            task_messages=task_messages,
+        )
+
+        contents = [str(message.content) for message in messages]
+        self.assertEqual(contents[0], "system")
+        self.assertNotIn("history 0", contents)
+        self.assertNotIn("history 1", contents)
+        self.assertIn("history 2", contents)
+        self.assertIn("history 9", contents)
+        self.assertEqual(contents[-1], "task-local")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -29,9 +29,13 @@ LLM_BASE_URL=https://api.deepseek.com
 LLM_MODEL=deepseek-chat
 LLM_TEMPERATURE=0.2
 STORAGE_DIR=storage
+CONVERSATION_METADATA_DB=
+LANGGRAPH_CHECKPOINT_DB=
 ```
 
 `ENABLE_MOCK_LLM=true` keeps the app usable without an LLM key. In mock mode the graph returns a canned chat response and skips real intent classification and tool calls. Set it to `false` and fill `LLM_API_KEY` to exercise document QA, edit tools, and `dom_mutation` events with a real OpenAI-compatible model.
+
+When omitted, `CONVERSATION_METADATA_DB` resolves to `storage/conversations.sqlite3` and `LANGGRAPH_CHECKPOINT_DB` resolves to `storage/langgraph_checkpoints.sqlite3`.
 
 ## API Surface
 
@@ -50,6 +54,7 @@ Canonical payload:
 ```json
 {
   "session_id": "session-123",
+  "conversation_id": "conv-clientGenerated123",
   "user_input": "帮我润色这段",
   "focus_element_id": "moss-block-abc",
   "focus_block_id": "moss-block-abc",
@@ -59,13 +64,25 @@ Canonical payload:
 
 The schema also accepts the older `message/context.documentHTML/context.cursorPosition` shape and normalizes it internally.
 
+`conversation_id` is optional. If omitted, the backend creates a conversation for the fixed development user `test-user` and uses that id as the LangGraph `thread_id`. `session_id` remains a browser/session marker and does not control thread recovery.
+
 SSE events emitted by the route:
 
+- `conversation`: emitted when the backend creates conversation metadata; data includes `conversation_id` and `user_id`.
 - `node_start` / `node_end`: graph progress for `intent`, `task_assemble`, `execute`, `tools`, and `task_advance`.
 - `chat_chunk`: assistant text, currently sent as complete message chunks with `done: true`.
 - `dom_mutation`: structured document edit emitted when `update_canvas_element` is called.
 - `done`: request completed.
 - `error`: request failed.
+
+Example `conversation` data:
+
+```json
+{
+  "conversation_id": "conv-clientGenerated123",
+  "user_id": "test-user"
+}
+```
 
 Example `dom_mutation` data:
 

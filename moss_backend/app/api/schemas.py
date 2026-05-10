@@ -6,6 +6,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.services.conversations import is_valid_conversation_id
+
 
 class ChatContext(BaseModel):
     document_html: str | None = Field(default=None, alias="documentHTML")
@@ -23,6 +25,7 @@ class ChatRequest(BaseModel):
     """
 
     session_id: str = Field(default_factory=lambda: f"session-{uuid4().hex}")
+    conversation_id: str | None = None
     user_input: str = ""
     focus_element_id: str | None = None
     focus_block_id: str | None = None
@@ -40,6 +43,8 @@ class ChatRequest(BaseModel):
                 self.canvas_snapshot = self.context.document_html
             if not self.focus_element_id and self.context.cursor_position:
                 self.focus_element_id = self.context.cursor_position
+        if self.conversation_id is not None and not is_valid_conversation_id(self.conversation_id):
+            raise ValueError("conversation_id must match conv-[A-Za-z0-9_-]{8,64}")
         if not self.user_input.strip():
             raise ValueError("user_input/message cannot be empty")
         return self

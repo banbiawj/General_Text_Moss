@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from markdownify import markdownify as html_to_markdown
 
@@ -21,11 +21,21 @@ from app.api.schemas import (
 )
 from app.core.config import get_settings
 from app.services.file_parser import ParsedDocument, parse_upload_file
+from app.services.conversations import (
+    DEFAULT_USER_ID,
+    ConversationStore,
+    InvalidConversationId,
+)
 from app.tools.document_tools import DOWNLOAD_CACHE
 
 
 api_router = APIRouter(prefix="/api/v1", tags=["api-v1"])
 document_router = APIRouter(prefix="/api/document", tags=["document"])
+
+
+def get_conversation_store() -> ConversationStore:
+    settings = get_settings()
+    return ConversationStore(settings.conversation_metadata_path)
 
 
 @api_router.get("/health", response_model=HealthResponse)
@@ -34,15 +44,36 @@ async def health() -> HealthResponse:
 
 
 @api_router.post("/chat-stream")
-async def chat_stream(payload: ChatRequest) -> StreamingResponse:
+async def chat_stream(payload: ChatRequest, request: Request) -> StreamingResponse:
+    try:
+        resolved = get_conversation_store().resolve(
+            user_id=DEFAULT_USER_ID,
+            conversation_id=payload.conversation_id,
+        )
+    except InvalidConversationId as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
     async def generator():
         try:
+            if resolved.created:
+                yield _sse(
+                    "conversation",
+                    {
+                        "conversation_id": resolved.record.conversation_id,
+                        "user_id": resolved.record.user_id,
+                    },
+                )
+
             async for event in stream_agent_events(
                 session_id=payload.session_id,
+                conversation_id=resolved.record.conversation_id,
                 user_input=payload.user_input,
                 focus_element_id=payload.focus_element_id,
                 focus_block_id=payload.focus_block_id,
                 canvas_snapshot=payload.canvas_snapshot,
+                compiled_graph=getattr(request.app.state, "agent_graph", None),
             ):
                 yield _sse(event["event"], event.get("data", {}))
             yield _sse("done", {"status": "ok"})

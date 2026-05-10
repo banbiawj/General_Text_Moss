@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>moss - 我的创作空间</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+    <script type="importmap">
+    {
+      "imports": {
+        "vue": "https://unpkg.com/vue@3/dist/vue.esm-browser.js"
+      }
+    }
+    </script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'] },
+                    colors: {
+                        brand: '#171717',
+                        surface: '#fafafa'
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #fafafa; 
+            color: #171717; 
+        }
+
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+
+        /* 卡片悬浮时的轻微上浮和阴影加深动画 */
+        .doc-card {
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .doc-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
+        }
+        
+        /* 文本截断 */
+        .line-clamp-3 {
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;  
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden selection:bg-black selection:text-white">
+
+<div id="app" class="relative h-full w-full flex flex-col bg-[#fafafa]">
+
+    <!-- 顶部导航栏 -->
+    <header class="bg-white/80 backdrop-blur-md border-b border-gray-100 shrink-0 z-50 sticky top-0">
+        <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full bg-black flex items-center justify-center shrink-0 shadow-sm">
+                    <i class="fa-solid fa-asterisk text-white text-xs"></i>
+                </div>
+                <span class="font-semibold tracking-wide text-gray-800">moss</span>
+                <span class="text-gray-300 mx-2">|</span>
+                <span class="text-sm font-medium text-gray-500">创作空间</span>
+            </div>
+
+            <div class="flex items-center gap-4">
+                <div class="relative group hidden sm:block">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-xs transition-colors group-focus-within:text-black"></i>
+                    <input v-model="searchQuery" 
+                           type="text" 
+                           placeholder="搜索文稿..." 
+                           class="bg-gray-50 border border-gray-200 text-sm rounded-full pl-9 pr-4 py-2 w-64 focus:outline-none focus:bg-white focus:border-gray-300 focus:ring-2 focus:ring-gray-100 transition-all placeholder-gray-400">
+                </div>
+                
+                <button class="bg-black hover:bg-gray-800 text-white text-sm px-5 py-2.5 rounded-full font-medium transition-all shadow-md transform hover:scale-105 active:scale-95 flex items-center gap-2">
+                    <i class="fa-solid fa-plus text-xs"></i>
+                    新建文稿
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主体内容区 -->
+    <main class="flex-1 overflow-y-auto pb-24 pt-8 px-6 no-scrollbar">
+        <div class="max-w-7xl mx-auto">
+            
+            <!-- 筛选与统计栏 -->
+            <div class="flex justify-between items-end mb-8">
+                <div>
+                    <h1 class="text-2xl font-semibold text-gray-800 mb-2">最近手稿</h1>
+                    <p class="text-sm text-gray-500">共 {{ filteredDocuments.length }} 份文稿，保持创作的热情。</p>
+                </div>
+                <div class="flex gap-2 bg-gray-100 p-1 rounded-lg">
+                    <button v-for="tab in tabs" :key="tab.id"
+                            @click="currentTab = tab.id"
+                            class="px-4 py-1.5 text-sm font-medium rounded-md transition-colors"
+                            :class="currentTab === tab.id ? 'bg-white text-black shadow-sm' : 'text-gray-500 hover:text-gray-700'">
+                        {{ tab.name }}
+                    </button>
+                </div>
+            </div>
+
+            <!-- 空状态 -->
+            <div v-if="filteredDocuments.length === 0" class="flex flex-col items-center justify-center py-20 text-center">
+                <div class="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center border border-gray-100 mb-4">
+                    <i class="fa-regular fa-folder-open text-2xl text-gray-300"></i>
+                </div>
+                <h3 class="text-lg font-medium text-gray-700">没有找到相关文稿</h3>
+                <p class="text-sm text-gray-500 mt-2">尝试更换搜索词，或者创建一个新的创作。</p>
+            </div>
+
+            <!-- 文稿网格 (书架视觉) -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                <div v-for="doc in filteredDocuments" :key="doc.id" 
+                     class="doc-card bg-white rounded-2xl border border-gray-100 p-6 flex flex-col h-[280px] cursor-pointer relative group">
+                    
+                    <!-- 装饰性的装订线/侧边条 -->
+                    <div class="absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl transition-colors duration-300"
+                         :class="getCategoryColor(doc.category)"></div>
+
+                    <!-- 卡片头部：标签与时间 -->
+                    <div class="flex justify-between items-center mb-4 pl-2">
+                        <span class="text-[11px] font-medium px-2.5 py-1 rounded-md flex items-center gap-1.5"
+                              :class="getCategoryStyle(doc.category)">
+                            <i :class="getCategoryIcon(doc.category)"></i>
+                            {{ doc.category }}
+                        </span>
+                        <span class="text-[11px] text-gray-400 font-medium">{{ doc.updateTime }}</span>
+                    </div>
+
+                    <!-- 卡片标题 -->
+                    <h2 class="text-lg font-semibold text-gray-800 leading-snug mb-3 pl-2 group-hover:text-black transition-colors">
+                        {{ doc.title }}
+                    </h2>
+
+                    <!-- 文稿摘要 (对话前瞻) -->
+                    <div class="flex-1 pl-2">
+                        <p class="text-[13px] text-gray-500 leading-relaxed line-clamp-3 font-light">
+                            {{ doc.summary }}
+                        </p>
+                    </div>
+
+                    <!-- 卡片底部：统计信息与操作 -->
+                    <div class="mt-4 pt-4 border-t border-gray-50 flex justify-between items-center pl-2">
+                        <div class="flex items-center gap-3 text-[11px] text-gray-400">
+                            <span title="字数"><i class="fa-solid fa-align-left mr-1"></i>{{ doc.wordCount }}w</span>
+                            <span title="对话轮次"><i class="fa-regular fa-comments mr-1"></i>{{ doc.chatTurns }}</span>
+                        </div>
+                        
+                        <div class="opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
+                            <button class="w-7 h-7 rounded-full hover:bg-gray-100 text-gray-500 flex items-center justify-center transition-colors" title="重命名">
+                                <i class="fa-solid fa-pen text-[10px]"></i>
+                            </button>
+                            <button class="w-7 h-7 rounded-full hover:bg-red-50 text-red-500 flex items-center justify-center transition-colors" title="删除">
+                                <i class="fa-regular fa-trash-can text-[10px]"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+</div>
+
+<script type="module">
+    import { createApp, ref, computed } from 'vue';
+
+    createApp({
+        setup() {
+            const searchQuery = ref('');
+            const currentTab = ref('all');
+            
+            const tabs = [
+                { id: 'all', name: '全部手稿' },
+                { id: 'academic', name: '学术研究' },
+                { id: 'dev', name: '开发设计' },
+                { id: 'prep', name: '个人规划' }
+            ];
+
+            // 模拟的文稿/对话历史数据
+            const documents = ref([
+                {
+                    id: 'doc-1',
+                    title: '毕业论文初稿：基于大语言模型的 Agent 架构研究',
+                    summary: '绪论部分已完成。引言探讨了在多智能体协同中引入工作记忆与长短期记忆机制的必要性，并对比了现有的 RAG 方案与 Mem0 框架在上下文保留上的性能差异...',
+                    category: '学术研究',
+                    updateTime: '10 分钟前',
+                    wordCount: '3.2',
+                    chatTurns: 15,
+                    tabId: 'academic'
+                },
+                {
+                    id: 'doc-2',
+                    title: 'Moss 简历生成项目：LangGraph 编排与后端设计',
+                    summary: '用户需求：将历史简历数据放入 RAG 库，利用 FastAPI 提供接口，前端使用 tiptap 替代基础 HTML 画布。去除了 PDF 导出功能，新增了 Ctrl+/ 唤起 AI 悬浮窗的快捷键设定。',
+                    category: '开发设计',
+                    updateTime: '2 小时前',
+                    wordCount: '1.8',
+                    chatTurns: 8,
+                    tabId: 'dev'
+                },
+                {
+                    id: 'doc-3',
+                    title: 'Python 全栈开发岗位面试复盘与知识点梳理',
+                    summary: '重点复习了 MySQL 联合索引优化原理。梳理了之前在 Django/Flask/FastAPI 构建 RESTful API 时的经验总结。准备了自我介绍的话术，特别是关于基于本地 http.server 实现文件共享的 Demo 说明。',
+                    category: '个人规划',
+                    updateTime: '昨天',
+                    wordCount: '4.5',
+                    chatTurns: 22,
+                    tabId: 'prep'
+                },
+                {
+                    id: 'doc-4',
+                    title: '浏览器插件 Agent 创意蓝图',
+                    summary: '核心构想：做一个常驻浏览器的智能插件，能够通过解析当前页面 DOM，直接帮助用户在当前页面完成特定任务操作。探讨了是否可以通过 Chrome-DevTools-MCP 协议来增强 Agent 的页面控制能力。',
+                    category: '开发设计',
+                    updateTime: '3 天前',
+                    wordCount: '2.1',
+                    chatTurns: 12,
+                    tabId: 'dev'
+                },
+                {
+                    id: 'doc-5',
+                    title: 'Vibe Coding 实践记录与 Agent 记忆底层原理解析',
+                    summary: '工作记忆、情景记忆、语义记忆与感知记忆在 Agent 设计中的对应关系。尝试使用 Codex CLI 协助后续的代码 vibe coding。结论：Agent 接入后端比想象中简单，但生成的代码质量仍受限于提示词工程，核心还是要提升个人技术。',
+                    category: '学术研究',
+                    updateTime: '上周',
+                    wordCount: '5.6',
+                    chatTurns: 34,
+                    tabId: 'academic'
+                }
+            ]);
+
+            const filteredDocuments = computed(() => {
+                let result = documents.value;
+                
+                // 标签筛选
+                if (currentTab.value !== 'all') {
+                    result = result.filter(doc => doc.tabId === currentTab.value);
+                }
+                
+                // 搜索词筛选
+                if (searchQuery.value.trim()) {
+                    const query = searchQuery.value.toLowerCase();
+                    result = result.filter(doc => 
+                        doc.title.toLowerCase().includes(query) || 
+                        doc.summary.toLowerCase().includes(query)
+                    );
+                }
+                
+                return result;
+            });
+
+            // 根据分类返回不同的装饰颜色
+            const getCategoryColor = (category) => {
+                const map = {
+                    '学术研究': 'bg-blue-400',
+                    '开发设计': 'bg-emerald-400',
+                    '个人规划': 'bg-amber-400'
+                };
+                return map[category] || 'bg-gray-400';
+            };
+
+            // 根据分类返回标签的样式
+            const getCategoryStyle = (category) => {
+                const map = {
+                    '学术研究': 'bg-blue-50 text-blue-600',
+                    '开发设计': 'bg-emerald-50 text-emerald-600',
+                    '个人规划': 'bg-amber-50 text-amber-600'
+                };
+                return map[category] || 'bg-gray-50 text-gray-600';
+            };
+
+            // 根据分类返回图标
+            const getCategoryIcon = (category) => {
+                const map = {
+                    '学术研究': 'fa-solid fa-graduation-cap',
+                    '开发设计': 'fa-solid fa-code',
+                    '个人规划': 'fa-regular fa-compass'
+                };
+                return map[category] || 'fa-regular fa-file-lines';
+            };
+
+            return {
+                searchQuery,
+                currentTab,
+                tabs,
+                filteredDocuments,
+                getCategoryColor,
+                getCategoryStyle,
+                getCategoryIcon
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>

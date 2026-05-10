@@ -243,6 +243,13 @@
         setup() {
             const sessionId = localStorage.getItem('moss-session-id') || `session-${makeId()}`;
             localStorage.setItem('moss-session-id', sessionId);
+            const currentConversationId = ref(localStorage.getItem('moss-current-conversation-id') || '');
+
+            const setCurrentConversationId = (conversationId) => {
+                if (!conversationId) return;
+                currentConversationId.value = conversationId;
+                localStorage.setItem('moss-current-conversation-id', conversationId);
+            };
 
             const inputText = ref('');
             const isModifying = ref(false);
@@ -900,6 +907,7 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             session_id: sessionId,
+                            ...(currentConversationId.value ? { conversation_id: currentConversationId.value } : {}),
                             user_input: currentInput,
                             focus_element_id: requestAnchors.focusElementId,
                             focus_block_id: requestAnchors.focusBlockId,
@@ -912,6 +920,10 @@
                     }
 
                     await readEventStream(response, async ({ event, data }) => {
+                        if (event === 'conversation' && data.conversation_id) {
+                            setCurrentConversationId(data.conversation_id);
+                        }
+
                         if (event === 'chat_chunk') {
                             await ensureAiMessage();
                             messages.value[aiIndex].content += data.content || '';
@@ -1101,7 +1113,9 @@
                 aiPopupInputRef,
                 submitAIPopup,
                 closeAIPopup,
-                documentTitle
+                documentTitle,
+                currentConversationId,
+                setCurrentConversationId
             };
         }
     }).mount('#app');

@@ -32,45 +32,68 @@
         @media (min-width: 1024px) { .masonry-grid { column-count: 3; } }
         @media (min-width: 1536px) { .masonry-grid { column-count: 4; } }
         .list-layout { display: flex; flex-direction: column; max-width: 48rem; margin: 0 auto; }
-        .note-item { break-inside: avoid; page-break-inside: avoid; margin-bottom: 1.25rem; transition: all 0.25s ease; }
+        .note-item { break-inside: avoid; page-break-inside: avoid; margin-bottom: 1.25rem; transition: border-color .2s ease, box-shadow .2s ease; }
         .note-item:hover { border-color: #d4d4d4; box-shadow: 0 4px 20px rgba(0,0,0,.04); }
         .line-clamp-custom { display: -webkit-box; -webkit-line-clamp: 8; -webkit-box-orient: vertical; overflow: hidden; }
     </style>
 </head>
 <body class="h-screen w-screen overflow-hidden selection:bg-black selection:text-white flex text-[15px]">
-<div id="app" class="h-full w-full flex bg-[#fafafa] relative">
-    <aside class="w-64 bg-[#fafafa] border-r border-gray-200 flex-shrink-0 flex flex-col h-full">
+<div id="app" class="h-full w-full flex bg-[#fafafa] relative" @click="closeNoteMenu">
+    <div v-if="isSidebarOpen && isMobile"
+         class="fixed inset-0 bg-black/20 backdrop-blur-[2px] z-40 md:hidden"
+         @click.stop="toggleSidebar"></div>
+
+    <aside :class="[
+        'fixed md:relative inset-y-0 left-0 z-50 w-64 bg-[#fafafa] border-r border-gray-200 flex-shrink-0 flex flex-col h-full transition-transform duration-300 ease-out',
+        isSidebarOpen ? 'translate-x-0 shadow-2xl md:shadow-none' : '-translate-x-full md:translate-x-0'
+    ]">
         <div class="p-5 flex items-center justify-between">
-            <div class="flex items-center gap-3">
-                <div class="w-7 h-7 rounded-md bg-black flex items-center justify-center shadow-sm">
+            <div class="flex items-center gap-3 min-w-0">
+                <div class="w-7 h-7 rounded-md bg-black flex items-center justify-center shadow-sm shrink-0">
                     <i class="fa-solid fa-asterisk text-white text-[10px]"></i>
                 </div>
-                <span class="font-semibold text-sm tracking-wide text-gray-800">moss notes</span>
+                <span class="font-semibold text-sm tracking-wide text-gray-800 truncate">moss notes</span>
             </div>
+            <button v-if="isMobile"
+                    @click="toggleSidebar"
+                    class="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-200 text-gray-500 transition"
+                    title="关闭侧边栏">
+                <i class="fa-solid fa-xmark text-sm"></i>
+            </button>
         </div>
+
         <div class="px-3 pb-4">
             <button @click="createNote"
                     :disabled="isCreating"
                     class="w-full bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-60 text-gray-700 text-sm py-2 rounded-lg transition shadow-sm flex items-center justify-center gap-2 active:scale-95">
-                <i class="fa-solid fa-pen-nib text-xs"></i>
+                <i v-if="isCreating" class="fa-solid fa-circle-notch fa-spin text-xs"></i>
+                <i v-else class="fa-solid fa-pen-nib text-xs"></i>
                 新建笔记
             </button>
         </div>
+
         <div class="flex-1 overflow-y-auto no-scrollbar px-3 py-2">
             <div class="text-xs font-semibold text-gray-400 mb-2 px-2 uppercase tracking-wider">视图</div>
             <ul class="space-y-0.5 mb-6">
                 <li>
-                    <a href="#" class="flex items-center gap-3 px-2 py-1.5 rounded-md font-medium text-sm bg-black/5 text-black">
-                        <i class="fa-regular fa-file-lines text-gray-500 w-4 text-center"></i> 全部笔记
-                    </a>
+                    <button @click="closeSidebarOnMobile"
+                            class="w-full flex items-center gap-3 px-2 py-1.5 rounded-md font-medium text-sm bg-black/5 text-black text-left">
+                        <i class="fa-regular fa-file-lines text-gray-500 w-4 text-center"></i>
+                        <span>全部笔记</span>
+                    </button>
                 </li>
             </ul>
         </div>
     </aside>
 
-    <main class="flex-1 flex flex-col h-full relative overflow-hidden bg-white md:rounded-l-2xl shadow-[-5px_0_30px_rgba(0,0,0,0.02)] border-l border-gray-100 z-10 min-w-0">
-        <header class="h-16 px-4 md:px-8 flex items-center justify-between border-b border-gray-50 bg-white/80 backdrop-blur-md sticky top-0 z-20 gap-4">
-            <div class="flex items-center gap-4 flex-1 min-w-0">
+    <main class="flex-1 flex flex-col h-full relative overflow-hidden bg-white md:rounded-l-lg shadow-[-5px_0_30px_rgba(0,0,0,0.02)] border-l border-gray-100 z-10 min-w-0">
+        <header class="h-16 px-4 md:px-8 flex items-center justify-between border-b border-gray-50 bg-white/80 backdrop-blur-md sticky top-0 z-20 gap-3">
+            <div class="flex items-center gap-2 md:gap-4 flex-1 min-w-0">
+                <button @click.stop="toggleSidebar"
+                        class="md:hidden w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 hover:text-black transition-colors shrink-0"
+                        title="打开侧边栏">
+                    <i class="fa-solid fa-bars-staggered text-sm"></i>
+                </button>
                 <div class="flex items-center gap-2 text-sm shrink-0 whitespace-nowrap">
                     <span class="text-gray-300 hidden sm:inline">/</span>
                     <span class="font-semibold text-gray-800 tracking-wide flex items-center gap-2">
@@ -80,63 +103,137 @@
                 </div>
                 <div class="flex items-center gap-3 flex-1 max-w-md bg-gray-50/60 px-3 py-1.5 rounded-lg border border-transparent focus-within:bg-white focus-within:border-gray-200 focus-within:shadow-sm transition-all group">
                     <i class="fa-solid fa-magnifying-glass text-gray-400 text-sm shrink-0 group-focus-within:text-blue-500 transition-colors"></i>
-                    <input v-model="searchQuery" type="text" placeholder="搜索..."
+                    <input v-model="searchQuery"
+                           type="text"
+                           placeholder="搜索..."
                            class="w-full bg-transparent border-none outline-none text-[14px] text-gray-800 placeholder-gray-400 font-light min-w-0">
                 </div>
             </div>
             <button @click="toggleViewMode"
-                    class="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 hover:text-black transition-colors text-gray-400"
+                    class="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 hover:text-black transition-colors text-gray-400 shrink-0"
                     :title="viewMode === 'grid' ? '切换为列表视图' : '切换为网格视图'">
                 <i :class="viewMode === 'grid' ? 'fa-solid fa-list-ul' : 'fa-solid fa-border-all'" class="text-sm"></i>
             </button>
         </header>
 
         <div class="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 no-scrollbar scroll-smooth bg-[#fcfcfc]">
-            <div class="max-w-7xl mx-auto h-full">
-                <div v-if="isLoading" class="h-full flex items-center justify-center text-gray-400">
+            <div class="max-w-7xl mx-auto min-h-full">
+                <div v-if="actionError" class="mb-4 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center justify-between gap-3">
+                    <span>{{ actionError }}</span>
+                    <button @click.stop="actionError = ''" class="text-red-500 hover:text-red-700" title="关闭提示">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+
+                <div v-if="isLoading" class="h-full min-h-[22rem] flex items-center justify-center text-gray-400">
                     <i class="fa-solid fa-circle-notch fa-spin mr-2"></i> 正在加载
                 </div>
 
-                <div v-else-if="loadError" class="h-full flex flex-col items-center justify-center text-gray-500">
+                <div v-else-if="loadError" class="h-full min-h-[22rem] flex flex-col items-center justify-center text-gray-500">
                     <p class="text-[15px] font-medium text-gray-700">笔记库加载失败</p>
-                    <p class="text-sm mt-1">{{ loadError }}</p>
+                    <p class="text-sm mt-1 max-w-lg text-center break-words">{{ loadError }}</p>
                     <button @click="loadNotes" class="mt-5 px-4 py-2 bg-black text-white rounded-lg text-sm">重试</button>
                 </div>
 
                 <div v-else-if="filteredNotes.length > 0" :class="viewMode === 'grid' ? 'masonry-grid' : 'list-layout'">
-                    <div v-for="note in filteredNotes" :key="note.note_id"
+                    <div v-for="note in filteredNotes"
+                         :key="note.note_id"
                          @click="openNote(note)"
-                         class="note-item bg-white border border-gray-200/80 rounded-xl p-4 md:p-5 cursor-pointer group relative">
-                        <h3 class="font-medium text-gray-900 text-[15px] md:text-base mb-2 md:mb-3 leading-snug">
-                            {{ note.title || 'Untitled note' }}
+                         class="note-item bg-white border border-gray-200/80 rounded-lg p-4 md:p-5 cursor-pointer group relative">
+                        <div class="absolute top-3 right-3 md:top-4 md:right-4 flex gap-1.5 bg-white/90 backdrop-blur-sm px-1.5 py-1 rounded-md shadow-sm border border-gray-100 z-10 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+                             @click.stop>
+                            <button @click.stop="togglePinned(note)"
+                                    class="text-gray-400 hover:text-black transition w-7 h-7 flex items-center justify-center rounded hover:bg-gray-50"
+                                    :title="note.pinned_at ? '取消置顶' : '置顶'">
+                                <i :class="note.pinned_at ? 'fa-solid fa-thumbtack text-black' : 'fa-solid fa-thumbtack'" class="text-xs"></i>
+                            </button>
+                            <button @click.stop="toggleNoteMenu(note, $event)"
+                                    class="text-gray-400 hover:text-black transition w-7 h-7 flex items-center justify-center rounded hover:bg-gray-50"
+                                    title="更多">
+                                <i class="fa-solid fa-ellipsis text-xs"></i>
+                            </button>
+                            <div v-if="openMenuNoteId === note.note_id"
+                                 class="absolute right-0 top-9 w-36 rounded-lg border border-gray-100 bg-white shadow-lg py-1 text-sm text-gray-700"
+                                 @click.stop>
+                                <button @click.stop="startRename(note)" class="w-full px-3 py-2 text-left hover:bg-gray-50 flex items-center gap-2">
+                                    <i class="fa-regular fa-pen-to-square text-xs text-gray-400"></i> 重命名
+                                </button>
+                                <button @click.stop="togglePinned(note)" class="w-full px-3 py-2 text-left hover:bg-gray-50 flex items-center gap-2">
+                                    <i class="fa-solid fa-thumbtack text-xs text-gray-400"></i> {{ note.pinned_at ? '取消置顶' : '置顶' }}
+                                </button>
+                                <button @click.stop="startDelete(note)" class="w-full px-3 py-2 text-left hover:bg-red-50 text-red-600 flex items-center gap-2">
+                                    <i class="fa-regular fa-trash-can text-xs"></i> 删除
+                                </button>
+                            </div>
+                        </div>
+
+                        <h3 class="font-medium text-gray-900 text-[15px] md:text-base mb-2 md:mb-3 leading-snug pr-14 break-words">
+                            {{ noteTitle(note) }}
                         </h3>
-                        <div class="text-gray-600 text-[13px] md:text-[14px] leading-relaxed line-clamp-custom font-light whitespace-pre-wrap">
+                        <div class="text-gray-600 text-[13px] md:text-[14px] leading-relaxed line-clamp-custom font-light whitespace-pre-wrap break-words">
                             {{ note.preview_text || '空白笔记' }}
                         </div>
-                        <div class="mt-4 pt-3 text-[10px] md:text-[11px] text-gray-400 font-medium tracking-wide flex justify-between items-center border-t border-gray-50/50">
+                        <div class="mt-4 pt-3 text-[10px] md:text-[11px] text-gray-400 font-medium tracking-wide flex justify-between items-center gap-3 border-t border-gray-50/50">
                             <span>{{ formatDate(note.updated_at) }}</span>
-                            <span class="bg-gray-50 px-2 py-1 rounded text-gray-500">默认线程</span>
+                            <span class="bg-gray-50 px-2 py-1 rounded text-gray-500 truncate max-w-[9rem]">
+                                {{ note.pinned_at ? '已置顶' : '默认线程' }}
+                            </span>
                         </div>
                     </div>
                 </div>
 
-                <div v-else class="h-full flex flex-col items-center justify-center text-gray-400">
+                <div v-else class="h-full min-h-[22rem] flex flex-col items-center justify-center text-gray-400">
                     <div class="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center border border-gray-100 mb-4">
                         <i class="fa-regular fa-folder-open text-2xl text-gray-300"></i>
                     </div>
-                    <p class="text-[15px] font-medium text-gray-600">还没有笔记</p>
-                    <p class="text-sm mt-1">新建一篇笔记开始写作</p>
-                    <button @click="createNote" class="mt-6 px-5 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition shadow-sm flex items-center gap-2">
+                    <p class="text-[15px] font-medium text-gray-600">{{ searchQuery ? '没有匹配的笔记' : '还没有笔记' }}</p>
+                    <p class="text-sm mt-1">{{ searchQuery ? '换个关键词再试试' : '新建一篇笔记开始写作' }}</p>
+                    <button v-if="!searchQuery"
+                            @click="createNote"
+                            class="mt-6 px-5 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition shadow-sm flex items-center gap-2">
                         <i class="fa-solid fa-pen-nib text-xs"></i> 新建笔记
                     </button>
                 </div>
             </div>
         </div>
     </main>
+
+    <div v-if="renameNote"
+         class="fixed inset-0 z-[70] flex items-center justify-center bg-black/20 px-4"
+         @click.self="cancelRename">
+        <div class="w-full max-w-sm rounded-lg bg-white border border-gray-100 shadow-xl p-4" @click.stop>
+            <div class="text-sm font-semibold text-gray-900 mb-3">重命名笔记</div>
+            <input ref="renameInputRef"
+                   v-model="renameValue"
+                   @keyup.enter="submitRename"
+                   @keyup.esc="cancelRename"
+                   class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-gray-400"
+                   placeholder="留空则使用正文标题">
+            <div class="mt-4 flex justify-end gap-2">
+                <button @click="cancelRename" class="px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100">取消</button>
+                <button @click="submitRename" class="px-3 py-2 rounded-lg text-sm bg-black text-white hover:bg-gray-800">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div v-if="deleteNoteTarget"
+         class="fixed inset-0 z-[70] flex items-center justify-center bg-black/20 px-4"
+         @click.self="cancelDelete">
+        <div class="w-full max-w-sm rounded-lg bg-white border border-gray-100 shadow-xl p-4" @click.stop>
+            <div class="text-sm font-semibold text-gray-900">删除笔记</div>
+            <p class="mt-2 text-sm text-gray-600 leading-relaxed break-words">
+                “{{ noteTitle(deleteNoteTarget) }}” 将从笔记库中移除。当前版本会保留数据，不会立即永久删除。
+            </p>
+            <div class="mt-4 flex justify-end gap-2">
+                <button @click="cancelDelete" class="px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100">取消</button>
+                <button @click="confirmDelete" class="px-3 py-2 rounded-lg text-sm bg-red-600 text-white hover:bg-red-700">删除</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script type="module">
-    import { createApp, ref, computed, onMounted } from 'vue';
+    import { createApp, ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 
     const DEFAULT_API_BASE = 'http://127.0.0.1:8000';
     const API_BASE = window.MOSS_API_BASE || (window.location.protocol.startsWith('http') ? window.location.origin : DEFAULT_API_BASE);
@@ -148,25 +245,84 @@
             const isLoading = ref(false);
             const isCreating = ref(false);
             const loadError = ref('');
+            const actionError = ref('');
             const searchQuery = ref('');
             const viewMode = ref(localStorage.getItem('moss-library-view-mode') || 'grid');
+            const isSidebarOpen = ref(true);
+            const isMobile = ref(false);
+            const openMenuNoteId = ref('');
+            const renameNote = ref(null);
+            const renameValue = ref('');
+            const renameInputRef = ref(null);
+            const deleteNoteTarget = ref(null);
+
+            const noteTitle = (note) => {
+                return note?.effective_title || note?.display_title || note?.title || 'Untitled note';
+            };
+
+            const compareNotes = (a, b) => {
+                if (a.pinned_at && !b.pinned_at) return -1;
+                if (!a.pinned_at && b.pinned_at) return 1;
+                if (a.pinned_at && b.pinned_at) {
+                    return String(b.pinned_at).localeCompare(String(a.pinned_at));
+                }
+                return String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
+            };
 
             const filteredNotes = computed(() => {
                 const query = searchQuery.value.trim().toLowerCase();
                 if (!query) return notes.value;
                 return notes.value.filter((note) => {
-                    return `${note.title || ''} ${note.preview_text || ''}`.toLowerCase().includes(query);
+                    return `${noteTitle(note)} ${note.preview_text || ''}`.toLowerCase().includes(query);
                 });
             });
+
+            const checkScreenSize = () => {
+                const mobile = window.innerWidth < 768;
+                isMobile.value = mobile;
+                isSidebarOpen.value = !mobile;
+            };
+
+            const toggleSidebar = () => {
+                isSidebarOpen.value = !isSidebarOpen.value;
+            };
+
+            const closeSidebarOnMobile = () => {
+                if (isMobile.value) isSidebarOpen.value = false;
+            };
+
+            const mergeNote = (updated) => {
+                notes.value = notes.value.map((note) => (
+                    note.note_id === updated.note_id ? { ...note, ...updated } : note
+                ));
+            };
+
+            const patchNote = async (note, payload) => {
+                actionError.value = '';
+                const response = await fetch(apiUrl(`/api/v1/notes/${encodeURIComponent(note.note_id)}`), {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!response.ok) throw new Error(await response.text());
+                const updated = await response.json();
+                mergeNote(updated);
+                return updated;
+            };
+
+            const removeNoteFromList = (noteId) => {
+                notes.value = notes.value.filter((note) => note.note_id !== noteId);
+            };
 
             const loadNotes = async () => {
                 isLoading.value = true;
                 loadError.value = '';
+                actionError.value = '';
                 try {
                     const response = await fetch(apiUrl('/api/v1/notes'));
                     if (!response.ok) throw new Error(await response.text());
                     const payload = await response.json();
-                    notes.value = payload.notes || [];
+                    notes.value = (payload.notes || []).sort(compareNotes);
                 } catch (error) {
                     loadError.value = error.message || 'unknown error';
                 } finally {
@@ -177,6 +333,7 @@
             const createNote = async () => {
                 if (isCreating.value) return;
                 isCreating.value = true;
+                actionError.value = '';
                 try {
                     const response = await fetch(apiUrl('/api/v1/notes'), { method: 'POST' });
                     if (!response.ok) throw new Error(await response.text());
@@ -186,7 +343,7 @@
                         default_conversation_id: payload.default_conversation_id
                     });
                 } catch (error) {
-                    loadError.value = error.message || 'create failed';
+                    actionError.value = error.message || 'create failed';
                 } finally {
                     isCreating.value = false;
                 }
@@ -205,6 +362,72 @@
                 localStorage.setItem('moss-library-view-mode', viewMode.value);
             };
 
+            const toggleNoteMenu = (note, event) => {
+                event?.stopPropagation?.();
+                openMenuNoteId.value = openMenuNoteId.value === note.note_id ? '' : note.note_id;
+            };
+
+            const closeNoteMenu = () => {
+                openMenuNoteId.value = '';
+            };
+
+            const togglePinned = async (note) => {
+                closeNoteMenu();
+                try {
+                    await patchNote(note, { pinned: !note.pinned_at });
+                    notes.value = [...notes.value].sort(compareNotes);
+                } catch (error) {
+                    actionError.value = error.message || '置顶操作失败';
+                }
+            };
+
+            const startRename = async (note) => {
+                closeNoteMenu();
+                renameNote.value = note;
+                renameValue.value = note.display_title || note.title || '';
+                await nextTick();
+                renameInputRef.value?.focus?.();
+            };
+
+            const cancelRename = () => {
+                renameNote.value = null;
+                renameValue.value = '';
+            };
+
+            const submitRename = async () => {
+                if (!renameNote.value) return;
+                try {
+                    await patchNote(renameNote.value, { display_title: renameValue.value });
+                    cancelRename();
+                } catch (error) {
+                    actionError.value = error.message || '重命名失败';
+                }
+            };
+
+            const startDelete = (note) => {
+                closeNoteMenu();
+                deleteNoteTarget.value = note;
+            };
+
+            const cancelDelete = () => {
+                deleteNoteTarget.value = null;
+            };
+
+            const confirmDelete = async () => {
+                if (!deleteNoteTarget.value) return;
+                const note = deleteNoteTarget.value;
+                try {
+                    const response = await fetch(apiUrl(`/api/v1/notes/${encodeURIComponent(note.note_id)}`), {
+                        method: 'DELETE'
+                    });
+                    if (!response.ok) throw new Error(await response.text());
+                    removeNoteFromList(note.note_id);
+                    cancelDelete();
+                } catch (error) {
+                    actionError.value = error.message || '删除失败';
+                }
+            };
+
             const formatDate = (value) => {
                 if (!value) return '';
                 try {
@@ -219,7 +442,15 @@
                 }
             };
 
-            onMounted(loadNotes);
+            onMounted(() => {
+                checkScreenSize();
+                window.addEventListener('resize', checkScreenSize);
+                loadNotes();
+            });
+
+            onUnmounted(() => {
+                window.removeEventListener('resize', checkScreenSize);
+            });
 
             return {
                 notes,
@@ -227,12 +458,32 @@
                 isLoading,
                 isCreating,
                 loadError,
+                actionError,
                 searchQuery,
                 viewMode,
+                isSidebarOpen,
+                isMobile,
+                openMenuNoteId,
+                renameNote,
+                renameValue,
+                renameInputRef,
+                deleteNoteTarget,
+                noteTitle,
                 loadNotes,
                 createNote,
                 openNote,
                 toggleViewMode,
+                toggleSidebar,
+                closeSidebarOnMobile,
+                toggleNoteMenu,
+                closeNoteMenu,
+                togglePinned,
+                startRename,
+                cancelRename,
+                submitRename,
+                startDelete,
+                cancelDelete,
+                confirmDelete,
                 formatDate
             };
         }

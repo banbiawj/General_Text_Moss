@@ -58,7 +58,10 @@ class NoteSummaryResponse(BaseModel):
     note_id: str
     default_conversation_id: str
     title: str
+    display_title: str | None = None
+    effective_title: str
     preview_text: str
+    pinned_at: str | None = None
     created_at: str
     updated_at: str
 
@@ -76,8 +79,11 @@ class NoteDetailResponse(BaseModel):
     note_id: str
     default_conversation_id: str
     title: str
+    display_title: str | None = None
+    effective_title: str
     canvas_snapshot: str
     preview_text: str
+    pinned_at: str | None = None
     created_at: str
     updated_at: str
 
@@ -91,6 +97,26 @@ class SaveNoteSnapshotResponse(BaseModel):
     title: str
     preview_text: str
     updated_at: str
+
+
+class UpdateNoteRequest(BaseModel):
+    display_title: str | None = None
+    pinned: bool | None = None
+
+
+class UpdateNoteResponse(BaseModel):
+    note_id: str
+    title: str
+    display_title: str | None = None
+    effective_title: str
+    preview_text: str
+    pinned_at: str | None = None
+    updated_at: str
+
+
+class DeleteNoteResponse(BaseModel):
+    note_id: str
+    deleted_at: str
 
 
 class ConversationMessageResponse(BaseModel):

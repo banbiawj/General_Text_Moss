@@ -15,6 +15,7 @@ from app.api.schemas import (
     ChatRequest,
     ConversationMessagesResponse,
     CreateNoteResponse,
+    DeleteNoteResponse,
     DocumentUploadResponse,
     ExportDocumentRequest,
     HealthResponse,
@@ -25,6 +26,8 @@ from app.api.schemas import (
     SaveDocumentResponse,
     SaveNoteSnapshotRequest,
     SaveNoteSnapshotResponse,
+    UpdateNoteRequest,
+    UpdateNoteResponse,
     UploadResponse,
 )
 from app.core.config import get_settings
@@ -34,7 +37,7 @@ from app.services.conversations import (
     ConversationStore,
     InvalidConversationId,
 )
-from app.services.notes import InvalidNoteId, NoteStore
+from app.services.notes import InvalidNoteId, NoteStore, _UNSET
 from app.tools.document_tools import DOWNLOAD_CACHE
 
 
@@ -69,7 +72,10 @@ async def list_notes() -> NoteListResponse:
                 note_id=note.note_id,
                 default_conversation_id=note.default_conversation_id,
                 title=note.title,
+                display_title=note.display_title,
+                effective_title=note.effective_title,
                 preview_text=note.preview_text,
+                pinned_at=note.pinned_at,
                 created_at=note.created_at,
                 updated_at=note.updated_at,
             )
@@ -99,8 +105,11 @@ async def get_note(note_id: str) -> NoteDetailResponse:
         note_id=note.note_id,
         default_conversation_id=note.default_conversation_id,
         title=note.title,
+        display_title=note.display_title,
+        effective_title=note.effective_title,
         canvas_snapshot=note.canvas_snapshot,
         preview_text=note.preview_text,
+        pinned_at=note.pinned_at,
         created_at=note.created_at,
         updated_at=note.updated_at,
     )
@@ -126,6 +135,53 @@ async def save_note_snapshot(
         title=saved.title,
         preview_text=saved.preview_text,
         updated_at=saved.updated_at,
+    )
+
+
+@api_router.patch("/notes/{note_id}", response_model=UpdateNoteResponse)
+async def update_note(
+    note_id: str,
+    payload: UpdateNoteRequest,
+) -> UpdateNoteResponse:
+    try:
+        display_title = (
+            payload.display_title
+            if "display_title" in payload.model_fields_set
+            else _UNSET
+        )
+        pinned = payload.pinned if "pinned" in payload.model_fields_set else _UNSET
+        updated = get_note_store().update_note(
+            DEFAULT_USER_ID,
+            note_id,
+            display_title=display_title,
+            pinned=pinned,
+        )
+    except InvalidNoteId as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return UpdateNoteResponse(
+        note_id=updated.note_id,
+        title=updated.title,
+        display_title=updated.display_title,
+        effective_title=updated.effective_title,
+        preview_text=updated.preview_text,
+        pinned_at=updated.pinned_at,
+        updated_at=updated.updated_at,
+    )
+
+
+@api_router.delete("/notes/{note_id}", response_model=DeleteNoteResponse)
+async def delete_note(note_id: str) -> DeleteNoteResponse:
+    try:
+        deleted = get_note_store().delete_note(DEFAULT_USER_ID, note_id)
+    except InvalidNoteId as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return DeleteNoteResponse(
+        note_id=deleted.note_id,
+        deleted_at=deleted.deleted_at,
     )
 
 

@@ -156,6 +156,112 @@ class NotesApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
 
+    def test_list_notes_returns_display_and_pin_fields(self) -> None:
+        created = self.store.create_note(DEFAULT_USER_ID)
+        self.store.save_snapshot(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+            "<h1>Body title</h1><p>Body</p>",
+        )
+        self.store.update_note(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+            display_title="Library title",
+            pinned=True,
+        )
+
+        response = self.request("GET", "/api/v1/notes")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        note = response.json()["notes"][0]
+        self.assertEqual(note["title"], "Body title")
+        self.assertEqual(note["display_title"], "Library title")
+        self.assertEqual(note["effective_title"], "Library title")
+        self.assertIsNotNone(note["pinned_at"])
+
+    def test_get_note_returns_effective_title_fields(self) -> None:
+        created = self.store.create_note(DEFAULT_USER_ID)
+        self.store.save_snapshot(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+            "<h1>Body title</h1><p>Body</p>",
+        )
+        self.store.update_note(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+            display_title="Library title",
+        )
+
+        response = self.request("GET", f"/api/v1/notes/{created.note.note_id}")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["display_title"], "Library title")
+        self.assertEqual(payload["effective_title"], "Library title")
+        self.assertEqual(payload["title"], "Body title")
+
+    def test_patch_note_updates_display_title_and_pin(self) -> None:
+        created = self.store.create_note(DEFAULT_USER_ID)
+
+        response = self.request(
+            "PATCH",
+            f"/api/v1/notes/{created.note.note_id}",
+            json={"display_title": "Renamed note", "pinned": True},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["display_title"], "Renamed note")
+        self.assertEqual(payload["effective_title"], "Renamed note")
+        self.assertIsNotNone(payload["pinned_at"])
+
+    def test_patch_note_can_clear_display_title_and_unpin(self) -> None:
+        created = self.store.create_note(DEFAULT_USER_ID)
+        self.store.save_snapshot(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+            "<h1>Auto title</h1>",
+        )
+        self.store.update_note(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+            display_title="Manual",
+            pinned=True,
+        )
+
+        response = self.request(
+            "PATCH",
+            f"/api/v1/notes/{created.note.note_id}",
+            json={"display_title": "", "pinned": False},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertIsNone(payload["display_title"])
+        self.assertEqual(payload["effective_title"], "Auto title")
+        self.assertIsNone(payload["pinned_at"])
+
+    def test_delete_note_soft_deletes_and_hides_from_list(self) -> None:
+        created = self.store.create_note(DEFAULT_USER_ID)
+
+        response = self.request("DELETE", f"/api/v1/notes/{created.note.note_id}")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNotNone(response.json()["deleted_at"])
+        list_response = self.request("GET", "/api/v1/notes")
+        self.assertEqual(list_response.json()["notes"], [])
+        get_response = self.request("GET", f"/api/v1/notes/{created.note.note_id}")
+        self.assertEqual(get_response.status_code, 404)
+
+    def test_repeated_delete_note_is_ok(self) -> None:
+        created = self.store.create_note(DEFAULT_USER_ID)
+        first = self.request("DELETE", f"/api/v1/notes/{created.note.note_id}")
+
+        second = self.request("DELETE", f"/api/v1/notes/{created.note.note_id}")
+
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertEqual(second.json()["deleted_at"], first.json()["deleted_at"])
+
     def test_get_unknown_note_returns_404(self) -> None:
         response = self.request("GET", "/api/v1/notes/note-missing123")
 

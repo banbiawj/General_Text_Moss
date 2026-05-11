@@ -283,6 +283,7 @@
             const saveStatus = ref('idle');
             const noteLoadError = ref('');
             const documentTitle = ref('Document.md');
+            const currentNoteDisplayTitle = ref('');
 
             const defaultPanelHeight = window.innerHeight * 0.55;
             const panelHeight = ref(defaultPanelHeight);
@@ -644,7 +645,8 @@
                 setCurrentNoteId(note.note_id);
                 setCurrentConversationId(initialConversationIdFromUrl || note.default_conversation_id);
                 syncNoteUrl();
-                documentTitle.value = note.title || 'Untitled note';
+                currentNoteDisplayTitle.value = note.display_title || '';
+                documentTitle.value = note.effective_title || note.display_title || note.title || 'Untitled note';
                 contentHTML.value = note.canvas_snapshot || '<p></p>';
                 lastSavedSnapshot = note.canvas_snapshot || '';
                 await loadConversationMessages();
@@ -680,7 +682,7 @@
                 }
                 const saved = await response.json();
                 lastSavedSnapshot = contentHTML.value;
-                documentTitle.value = saved.title || documentTitle.value;
+                documentTitle.value = currentNoteDisplayTitle.value || saved.title || documentTitle.value;
                 saveStatus.value = 'saved';
             };
 

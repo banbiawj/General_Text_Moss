@@ -370,6 +370,155 @@ class NoteStoreTests(unittest.TestCase):
             "<h1>Recovered title</h1><p>Recovered body</p>",
         )
 
+    def test_note_management_fields_are_added_to_existing_notes_table(self) -> None:
+        db_path = self.make_temp_dir() / "metadata.sqlite3"
+        conn = sqlite3.connect(db_path)
+        conn.execute("PRAGMA journal_mode=TRUNCATE")
+        conn.execute(
+            """
+            CREATE TABLE notes (
+                note_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                preview_text TEXT NOT NULL,
+                canvas_snapshot TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE conversations (
+                conversation_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                note_id TEXT,
+                is_default INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        NoteStore(db_path)
+
+        conn = sqlite3.connect(db_path)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(notes)").fetchall()}
+        conn.close()
+        self.assertIn("display_title", columns)
+        self.assertIn("deleted_at", columns)
+        self.assertIn("pinned_at", columns)
+
+    def test_update_note_display_title_does_not_modify_snapshot_or_updated_at(
+        self,
+    ) -> None:
+        store = NoteStore(self.make_temp_dir() / "metadata.sqlite3")
+        created = store.create_note(DEFAULT_USER_ID)
+        saved = store.save_snapshot(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+            "<h1>Body title</h1><p>Body text</p>",
+        )
+
+        updated = store.update_note(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+            display_title="Library name",
+        )
+
+        self.assertEqual(updated.display_title, "Library name")
+        self.assertEqual(updated.effective_title, "Library name")
+        self.assertEqual(updated.title, "Body title")
+        self.assertEqual(updated.updated_at, saved.updated_at)
+        loaded = store.get_note(DEFAULT_USER_ID, created.note.note_id)
+        self.assertEqual(loaded.canvas_snapshot, "<h1>Body title</h1><p>Body text</p>")
+
+    def test_clearing_display_title_restores_effective_auto_title(self) -> None:
+        store = NoteStore(self.make_temp_dir() / "metadata.sqlite3")
+        created = store.create_note(DEFAULT_USER_ID)
+        store.save_snapshot(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+            "<h1>Auto title</h1><p>Body text</p>",
+        )
+        store.update_note(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+            display_title="Manual title",
+        )
+
+        updated = store.update_note(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+            display_title="   ",
+        )
+
+        self.assertIsNone(updated.display_title)
+        self.assertEqual(updated.effective_title, "Auto title")
+
+    def test_pinned_notes_sort_before_unpinned_without_touching_updated_at(
+        self,
+    ) -> None:
+        store = NoteStore(self.make_temp_dir() / "metadata.sqlite3")
+        first = store.create_note(DEFAULT_USER_ID)
+        time.sleep(0.01)
+        second = store.create_note(DEFAULT_USER_ID)
+        first_saved = store.save_snapshot(
+            DEFAULT_USER_ID,
+            first.note.note_id,
+            "<h1>First</h1>",
+        )
+        time.sleep(0.01)
+        second_saved = store.save_snapshot(
+            DEFAULT_USER_ID,
+            second.note.note_id,
+            "<h1>Second</h1>",
+        )
+
+        pinned = store.update_note(DEFAULT_USER_ID, first.note.note_id, pinned=True)
+        notes = store.list_notes(DEFAULT_USER_ID)
+
+        self.assertEqual(
+            [note.note_id for note in notes],
+            [first.note.note_id, second.note.note_id],
+        )
+        self.assertIsNotNone(pinned.pinned_at)
+        self.assertEqual(pinned.updated_at, first_saved.updated_at)
+        self.assertGreater(second_saved.updated_at, first_saved.updated_at)
+
+    def test_unpin_clears_pinned_at(self) -> None:
+        store = NoteStore(self.make_temp_dir() / "metadata.sqlite3")
+        created = store.create_note(DEFAULT_USER_ID)
+        store.update_note(DEFAULT_USER_ID, created.note.note_id, pinned=True)
+
+        updated = store.update_note(DEFAULT_USER_ID, created.note.note_id, pinned=False)
+
+        self.assertIsNone(updated.pinned_at)
+
+    def test_soft_delete_hides_note_from_list_and_get(self) -> None:
+        store = NoteStore(self.make_temp_dir() / "metadata.sqlite3")
+        created = store.create_note(DEFAULT_USER_ID)
+
+        deleted = store.delete_note(DEFAULT_USER_ID, created.note.note_id)
+
+        self.assertEqual(deleted.note_id, created.note.note_id)
+        self.assertIsNotNone(deleted.deleted_at)
+        self.assertEqual(store.list_notes(DEFAULT_USER_ID), [])
+        with self.assertRaises(KeyError):
+            store.get_note(DEFAULT_USER_ID, created.note.note_id)
+
+    def test_soft_delete_is_idempotent(self) -> None:
+        store = NoteStore(self.make_temp_dir() / "metadata.sqlite3")
+        created = store.create_note(DEFAULT_USER_ID)
+        deleted = store.delete_note(DEFAULT_USER_ID, created.note.note_id)
+
+        repeated = store.delete_note(DEFAULT_USER_ID, created.note.note_id)
+
+        self.assertEqual(repeated.deleted_at, deleted.deleted_at)
+
 
 if __name__ == "__main__":
     unittest.main()

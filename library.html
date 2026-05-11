@@ -3,11 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>moss - 我的创作空间</title>
+    <title>moss - 笔记库</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-
     <script type="importmap">
     {
       "imports": {
@@ -15,292 +14,226 @@
       }
     }
     </script>
-
     <script>
         tailwind.config = {
             theme: {
                 extend: {
                     fontFamily: { sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'] },
-                    colors: {
-                        brand: '#171717',
-                        surface: '#fafafa'
-                    }
                 }
             }
         }
     </script>
-
     <style>
-        body { 
-            font-family: 'Inter', sans-serif; 
-            background-color: #fafafa; 
-            color: #171717; 
-        }
-
+        body { font-family: 'Inter', sans-serif; background-color: #fafafa; color: #171717; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
-
-        /* 卡片悬浮时的轻微上浮和阴影加深动画 */
-        .doc-card {
-            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        .doc-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
-        }
-        
-        /* 文本截断 */
-        .line-clamp-3 {
-            display: -webkit-box;
-            -webkit-line-clamp: 3;
-            -webkit-box-orient: vertical;  
-            overflow: hidden;
-        }
+        .masonry-grid { column-count: 1; column-gap: 1.25rem; }
+        @media (min-width: 640px) { .masonry-grid { column-count: 2; } }
+        @media (min-width: 1024px) { .masonry-grid { column-count: 3; } }
+        @media (min-width: 1536px) { .masonry-grid { column-count: 4; } }
+        .list-layout { display: flex; flex-direction: column; max-width: 48rem; margin: 0 auto; }
+        .note-item { break-inside: avoid; page-break-inside: avoid; margin-bottom: 1.25rem; transition: all 0.25s ease; }
+        .note-item:hover { border-color: #d4d4d4; box-shadow: 0 4px 20px rgba(0,0,0,.04); }
+        .line-clamp-custom { display: -webkit-box; -webkit-line-clamp: 8; -webkit-box-orient: vertical; overflow: hidden; }
     </style>
 </head>
-<body class="h-screen w-screen overflow-hidden selection:bg-black selection:text-white">
-
-<div id="app" class="relative h-full w-full flex flex-col bg-[#fafafa]">
-
-    <!-- 顶部导航栏 -->
-    <header class="bg-white/80 backdrop-blur-md border-b border-gray-100 shrink-0 z-50 sticky top-0">
-        <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+<body class="h-screen w-screen overflow-hidden selection:bg-black selection:text-white flex text-[15px]">
+<div id="app" class="h-full w-full flex bg-[#fafafa] relative">
+    <aside class="w-64 bg-[#fafafa] border-r border-gray-200 flex-shrink-0 flex flex-col h-full">
+        <div class="p-5 flex items-center justify-between">
             <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded-full bg-black flex items-center justify-center shrink-0 shadow-sm">
-                    <i class="fa-solid fa-asterisk text-white text-xs"></i>
+                <div class="w-7 h-7 rounded-md bg-black flex items-center justify-center shadow-sm">
+                    <i class="fa-solid fa-asterisk text-white text-[10px]"></i>
                 </div>
-                <span class="font-semibold tracking-wide text-gray-800">moss</span>
-                <span class="text-gray-300 mx-2">|</span>
-                <span class="text-sm font-medium text-gray-500">创作空间</span>
-            </div>
-
-            <div class="flex items-center gap-4">
-                <div class="relative group hidden sm:block">
-                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-xs transition-colors group-focus-within:text-black"></i>
-                    <input v-model="searchQuery" 
-                           type="text" 
-                           placeholder="搜索文稿..." 
-                           class="bg-gray-50 border border-gray-200 text-sm rounded-full pl-9 pr-4 py-2 w-64 focus:outline-none focus:bg-white focus:border-gray-300 focus:ring-2 focus:ring-gray-100 transition-all placeholder-gray-400">
-                </div>
-                
-                <button class="bg-black hover:bg-gray-800 text-white text-sm px-5 py-2.5 rounded-full font-medium transition-all shadow-md transform hover:scale-105 active:scale-95 flex items-center gap-2">
-                    <i class="fa-solid fa-plus text-xs"></i>
-                    新建文稿
-                </button>
+                <span class="font-semibold text-sm tracking-wide text-gray-800">moss notes</span>
             </div>
         </div>
-    </header>
+        <div class="px-3 pb-4">
+            <button @click="createNote"
+                    :disabled="isCreating"
+                    class="w-full bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-60 text-gray-700 text-sm py-2 rounded-lg transition shadow-sm flex items-center justify-center gap-2 active:scale-95">
+                <i class="fa-solid fa-pen-nib text-xs"></i>
+                新建笔记
+            </button>
+        </div>
+        <div class="flex-1 overflow-y-auto no-scrollbar px-3 py-2">
+            <div class="text-xs font-semibold text-gray-400 mb-2 px-2 uppercase tracking-wider">视图</div>
+            <ul class="space-y-0.5 mb-6">
+                <li>
+                    <a href="#" class="flex items-center gap-3 px-2 py-1.5 rounded-md font-medium text-sm bg-black/5 text-black">
+                        <i class="fa-regular fa-file-lines text-gray-500 w-4 text-center"></i> 全部笔记
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </aside>
 
-    <!-- 主体内容区 -->
-    <main class="flex-1 overflow-y-auto pb-24 pt-8 px-6 no-scrollbar">
-        <div class="max-w-7xl mx-auto">
-            
-            <!-- 筛选与统计栏 -->
-            <div class="flex justify-between items-end mb-8">
-                <div>
-                    <h1 class="text-2xl font-semibold text-gray-800 mb-2">最近手稿</h1>
-                    <p class="text-sm text-gray-500">共 {{ filteredDocuments.length }} 份文稿，保持创作的热情。</p>
+    <main class="flex-1 flex flex-col h-full relative overflow-hidden bg-white md:rounded-l-2xl shadow-[-5px_0_30px_rgba(0,0,0,0.02)] border-l border-gray-100 z-10 min-w-0">
+        <header class="h-16 px-4 md:px-8 flex items-center justify-between border-b border-gray-50 bg-white/80 backdrop-blur-md sticky top-0 z-20 gap-4">
+            <div class="flex items-center gap-4 flex-1 min-w-0">
+                <div class="flex items-center gap-2 text-sm shrink-0 whitespace-nowrap">
+                    <span class="text-gray-300 hidden sm:inline">/</span>
+                    <span class="font-semibold text-gray-800 tracking-wide flex items-center gap-2">
+                        <i class="fa-regular fa-file-lines text-gray-400 hidden sm:inline"></i>
+                        全部笔记
+                    </span>
                 </div>
-                <div class="flex gap-2 bg-gray-100 p-1 rounded-lg">
-                    <button v-for="tab in tabs" :key="tab.id"
-                            @click="currentTab = tab.id"
-                            class="px-4 py-1.5 text-sm font-medium rounded-md transition-colors"
-                            :class="currentTab === tab.id ? 'bg-white text-black shadow-sm' : 'text-gray-500 hover:text-gray-700'">
-                        {{ tab.name }}
+                <div class="flex items-center gap-3 flex-1 max-w-md bg-gray-50/60 px-3 py-1.5 rounded-lg border border-transparent focus-within:bg-white focus-within:border-gray-200 focus-within:shadow-sm transition-all group">
+                    <i class="fa-solid fa-magnifying-glass text-gray-400 text-sm shrink-0 group-focus-within:text-blue-500 transition-colors"></i>
+                    <input v-model="searchQuery" type="text" placeholder="搜索..."
+                           class="w-full bg-transparent border-none outline-none text-[14px] text-gray-800 placeholder-gray-400 font-light min-w-0">
+                </div>
+            </div>
+            <button @click="toggleViewMode"
+                    class="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 hover:text-black transition-colors text-gray-400"
+                    :title="viewMode === 'grid' ? '切换为列表视图' : '切换为网格视图'">
+                <i :class="viewMode === 'grid' ? 'fa-solid fa-list-ul' : 'fa-solid fa-border-all'" class="text-sm"></i>
+            </button>
+        </header>
+
+        <div class="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 no-scrollbar scroll-smooth bg-[#fcfcfc]">
+            <div class="max-w-7xl mx-auto h-full">
+                <div v-if="isLoading" class="h-full flex items-center justify-center text-gray-400">
+                    <i class="fa-solid fa-circle-notch fa-spin mr-2"></i> 正在加载
+                </div>
+
+                <div v-else-if="loadError" class="h-full flex flex-col items-center justify-center text-gray-500">
+                    <p class="text-[15px] font-medium text-gray-700">笔记库加载失败</p>
+                    <p class="text-sm mt-1">{{ loadError }}</p>
+                    <button @click="loadNotes" class="mt-5 px-4 py-2 bg-black text-white rounded-lg text-sm">重试</button>
+                </div>
+
+                <div v-else-if="filteredNotes.length > 0" :class="viewMode === 'grid' ? 'masonry-grid' : 'list-layout'">
+                    <div v-for="note in filteredNotes" :key="note.note_id"
+                         @click="openNote(note)"
+                         class="note-item bg-white border border-gray-200/80 rounded-xl p-4 md:p-5 cursor-pointer group relative">
+                        <h3 class="font-medium text-gray-900 text-[15px] md:text-base mb-2 md:mb-3 leading-snug">
+                            {{ note.title || 'Untitled note' }}
+                        </h3>
+                        <div class="text-gray-600 text-[13px] md:text-[14px] leading-relaxed line-clamp-custom font-light whitespace-pre-wrap">
+                            {{ note.preview_text || '空白笔记' }}
+                        </div>
+                        <div class="mt-4 pt-3 text-[10px] md:text-[11px] text-gray-400 font-medium tracking-wide flex justify-between items-center border-t border-gray-50/50">
+                            <span>{{ formatDate(note.updated_at) }}</span>
+                            <span class="bg-gray-50 px-2 py-1 rounded text-gray-500">默认线程</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-else class="h-full flex flex-col items-center justify-center text-gray-400">
+                    <div class="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center border border-gray-100 mb-4">
+                        <i class="fa-regular fa-folder-open text-2xl text-gray-300"></i>
+                    </div>
+                    <p class="text-[15px] font-medium text-gray-600">还没有笔记</p>
+                    <p class="text-sm mt-1">新建一篇笔记开始写作</p>
+                    <button @click="createNote" class="mt-6 px-5 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition shadow-sm flex items-center gap-2">
+                        <i class="fa-solid fa-pen-nib text-xs"></i> 新建笔记
                     </button>
                 </div>
             </div>
-
-            <!-- 空状态 -->
-            <div v-if="filteredDocuments.length === 0" class="flex flex-col items-center justify-center py-20 text-center">
-                <div class="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center border border-gray-100 mb-4">
-                    <i class="fa-regular fa-folder-open text-2xl text-gray-300"></i>
-                </div>
-                <h3 class="text-lg font-medium text-gray-700">没有找到相关文稿</h3>
-                <p class="text-sm text-gray-500 mt-2">尝试更换搜索词，或者创建一个新的创作。</p>
-            </div>
-
-            <!-- 文稿网格 (书架视觉) -->
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                <div v-for="doc in filteredDocuments" :key="doc.id" 
-                     class="doc-card bg-white rounded-2xl border border-gray-100 p-6 flex flex-col h-[280px] cursor-pointer relative group">
-                    
-                    <!-- 装饰性的装订线/侧边条 -->
-                    <div class="absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl transition-colors duration-300"
-                         :class="getCategoryColor(doc.category)"></div>
-
-                    <!-- 卡片头部：标签与时间 -->
-                    <div class="flex justify-between items-center mb-4 pl-2">
-                        <span class="text-[11px] font-medium px-2.5 py-1 rounded-md flex items-center gap-1.5"
-                              :class="getCategoryStyle(doc.category)">
-                            <i :class="getCategoryIcon(doc.category)"></i>
-                            {{ doc.category }}
-                        </span>
-                        <span class="text-[11px] text-gray-400 font-medium">{{ doc.updateTime }}</span>
-                    </div>
-
-                    <!-- 卡片标题 -->
-                    <h2 class="text-lg font-semibold text-gray-800 leading-snug mb-3 pl-2 group-hover:text-black transition-colors">
-                        {{ doc.title }}
-                    </h2>
-
-                    <!-- 文稿摘要 (对话前瞻) -->
-                    <div class="flex-1 pl-2">
-                        <p class="text-[13px] text-gray-500 leading-relaxed line-clamp-3 font-light">
-                            {{ doc.summary }}
-                        </p>
-                    </div>
-
-                    <!-- 卡片底部：统计信息与操作 -->
-                    <div class="mt-4 pt-4 border-t border-gray-50 flex justify-between items-center pl-2">
-                        <div class="flex items-center gap-3 text-[11px] text-gray-400">
-                            <span title="字数"><i class="fa-solid fa-align-left mr-1"></i>{{ doc.wordCount }}w</span>
-                            <span title="对话轮次"><i class="fa-regular fa-comments mr-1"></i>{{ doc.chatTurns }}</span>
-                        </div>
-                        
-                        <div class="opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
-                            <button class="w-7 h-7 rounded-full hover:bg-gray-100 text-gray-500 flex items-center justify-center transition-colors" title="重命名">
-                                <i class="fa-solid fa-pen text-[10px]"></i>
-                            </button>
-                            <button class="w-7 h-7 rounded-full hover:bg-red-50 text-red-500 flex items-center justify-center transition-colors" title="删除">
-                                <i class="fa-regular fa-trash-can text-[10px]"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
         </div>
     </main>
 </div>
 
 <script type="module">
-    import { createApp, ref, computed } from 'vue';
+    import { createApp, ref, computed, onMounted } from 'vue';
+
+    const DEFAULT_API_BASE = 'http://127.0.0.1:8000';
+    const API_BASE = window.MOSS_API_BASE || (window.location.protocol.startsWith('http') ? window.location.origin : DEFAULT_API_BASE);
+    const apiUrl = (path) => `${API_BASE.replace(/\/$/, '')}${path}`;
 
     createApp({
         setup() {
+            const notes = ref([]);
+            const isLoading = ref(false);
+            const isCreating = ref(false);
+            const loadError = ref('');
             const searchQuery = ref('');
-            const currentTab = ref('all');
-            
-            const tabs = [
-                { id: 'all', name: '全部手稿' },
-                { id: 'academic', name: '学术研究' },
-                { id: 'dev', name: '开发设计' },
-                { id: 'prep', name: '个人规划' }
-            ];
+            const viewMode = ref(localStorage.getItem('moss-library-view-mode') || 'grid');
 
-            // 模拟的文稿/对话历史数据
-            const documents = ref([
-                {
-                    id: 'doc-1',
-                    title: '毕业论文初稿：基于大语言模型的 Agent 架构研究',
-                    summary: '绪论部分已完成。引言探讨了在多智能体协同中引入工作记忆与长短期记忆机制的必要性，并对比了现有的 RAG 方案与 Mem0 框架在上下文保留上的性能差异...',
-                    category: '学术研究',
-                    updateTime: '10 分钟前',
-                    wordCount: '3.2',
-                    chatTurns: 15,
-                    tabId: 'academic'
-                },
-                {
-                    id: 'doc-2',
-                    title: 'Moss 简历生成项目：LangGraph 编排与后端设计',
-                    summary: '用户需求：将历史简历数据放入 RAG 库，利用 FastAPI 提供接口，前端使用 tiptap 替代基础 HTML 画布。去除了 PDF 导出功能，新增了 Ctrl+/ 唤起 AI 悬浮窗的快捷键设定。',
-                    category: '开发设计',
-                    updateTime: '2 小时前',
-                    wordCount: '1.8',
-                    chatTurns: 8,
-                    tabId: 'dev'
-                },
-                {
-                    id: 'doc-3',
-                    title: 'Python 全栈开发岗位面试复盘与知识点梳理',
-                    summary: '重点复习了 MySQL 联合索引优化原理。梳理了之前在 Django/Flask/FastAPI 构建 RESTful API 时的经验总结。准备了自我介绍的话术，特别是关于基于本地 http.server 实现文件共享的 Demo 说明。',
-                    category: '个人规划',
-                    updateTime: '昨天',
-                    wordCount: '4.5',
-                    chatTurns: 22,
-                    tabId: 'prep'
-                },
-                {
-                    id: 'doc-4',
-                    title: '浏览器插件 Agent 创意蓝图',
-                    summary: '核心构想：做一个常驻浏览器的智能插件，能够通过解析当前页面 DOM，直接帮助用户在当前页面完成特定任务操作。探讨了是否可以通过 Chrome-DevTools-MCP 协议来增强 Agent 的页面控制能力。',
-                    category: '开发设计',
-                    updateTime: '3 天前',
-                    wordCount: '2.1',
-                    chatTurns: 12,
-                    tabId: 'dev'
-                },
-                {
-                    id: 'doc-5',
-                    title: 'Vibe Coding 实践记录与 Agent 记忆底层原理解析',
-                    summary: '工作记忆、情景记忆、语义记忆与感知记忆在 Agent 设计中的对应关系。尝试使用 Codex CLI 协助后续的代码 vibe coding。结论：Agent 接入后端比想象中简单，但生成的代码质量仍受限于提示词工程，核心还是要提升个人技术。',
-                    category: '学术研究',
-                    updateTime: '上周',
-                    wordCount: '5.6',
-                    chatTurns: 34,
-                    tabId: 'academic'
-                }
-            ]);
-
-            const filteredDocuments = computed(() => {
-                let result = documents.value;
-                
-                // 标签筛选
-                if (currentTab.value !== 'all') {
-                    result = result.filter(doc => doc.tabId === currentTab.value);
-                }
-                
-                // 搜索词筛选
-                if (searchQuery.value.trim()) {
-                    const query = searchQuery.value.toLowerCase();
-                    result = result.filter(doc => 
-                        doc.title.toLowerCase().includes(query) || 
-                        doc.summary.toLowerCase().includes(query)
-                    );
-                }
-                
-                return result;
+            const filteredNotes = computed(() => {
+                const query = searchQuery.value.trim().toLowerCase();
+                if (!query) return notes.value;
+                return notes.value.filter((note) => {
+                    return `${note.title || ''} ${note.preview_text || ''}`.toLowerCase().includes(query);
+                });
             });
 
-            // 根据分类返回不同的装饰颜色
-            const getCategoryColor = (category) => {
-                const map = {
-                    '学术研究': 'bg-blue-400',
-                    '开发设计': 'bg-emerald-400',
-                    '个人规划': 'bg-amber-400'
-                };
-                return map[category] || 'bg-gray-400';
+            const loadNotes = async () => {
+                isLoading.value = true;
+                loadError.value = '';
+                try {
+                    const response = await fetch(apiUrl('/api/v1/notes'));
+                    if (!response.ok) throw new Error(await response.text());
+                    const payload = await response.json();
+                    notes.value = payload.notes || [];
+                } catch (error) {
+                    loadError.value = error.message || 'unknown error';
+                } finally {
+                    isLoading.value = false;
+                }
             };
 
-            // 根据分类返回标签的样式
-            const getCategoryStyle = (category) => {
-                const map = {
-                    '学术研究': 'bg-blue-50 text-blue-600',
-                    '开发设计': 'bg-emerald-50 text-emerald-600',
-                    '个人规划': 'bg-amber-50 text-amber-600'
-                };
-                return map[category] || 'bg-gray-50 text-gray-600';
+            const createNote = async () => {
+                if (isCreating.value) return;
+                isCreating.value = true;
+                try {
+                    const response = await fetch(apiUrl('/api/v1/notes'), { method: 'POST' });
+                    if (!response.ok) throw new Error(await response.text());
+                    const payload = await response.json();
+                    openNote({
+                        note_id: payload.note_id,
+                        default_conversation_id: payload.default_conversation_id
+                    });
+                } catch (error) {
+                    loadError.value = error.message || 'create failed';
+                } finally {
+                    isCreating.value = false;
+                }
             };
 
-            // 根据分类返回图标
-            const getCategoryIcon = (category) => {
-                const map = {
-                    '学术研究': 'fa-solid fa-graduation-cap',
-                    '开发设计': 'fa-solid fa-code',
-                    '个人规划': 'fa-regular fa-compass'
-                };
-                return map[category] || 'fa-regular fa-file-lines';
+            const openNote = (note) => {
+                const params = new URLSearchParams({
+                    note_id: note.note_id,
+                    conversation_id: note.default_conversation_id
+                });
+                window.location.href = `/?${params.toString()}`;
             };
+
+            const toggleViewMode = () => {
+                viewMode.value = viewMode.value === 'grid' ? 'list' : 'grid';
+                localStorage.setItem('moss-library-view-mode', viewMode.value);
+            };
+
+            const formatDate = (value) => {
+                if (!value) return '';
+                try {
+                    return new Intl.DateTimeFormat('zh-CN', {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    }).format(new Date(value));
+                } catch {
+                    return value;
+                }
+            };
+
+            onMounted(loadNotes);
 
             return {
+                notes,
+                filteredNotes,
+                isLoading,
+                isCreating,
+                loadError,
                 searchQuery,
-                currentTab,
-                tabs,
-                filteredDocuments,
-                getCategoryColor,
-                getCategoryStyle,
-                getCategoryIcon
+                viewMode,
+                loadNotes,
+                createNote,
+                openNote,
+                toggleViewMode,
+                formatDate
             };
         }
     }).mount('#app');

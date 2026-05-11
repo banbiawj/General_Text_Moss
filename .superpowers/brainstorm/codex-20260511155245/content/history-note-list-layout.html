@@ -1,0 +1,117 @@
+<style>
+  .moss-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; align-items: stretch; }
+  .moss-card { border: 1px solid #e5e7eb; border-radius: 10px; background: #fff; overflow: hidden; cursor: pointer; transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease; }
+  .moss-card:hover { border-color: #111827; box-shadow: 0 12px 30px rgba(0,0,0,.08); transform: translateY(-2px); }
+  .moss-card.selected { border-color: #111827; box-shadow: 0 0 0 2px #111827 inset; }
+  .moss-card-body { padding: 14px 14px 16px; }
+  .moss-card h3 { margin: 0 0 6px; font-size: 16px; }
+  .moss-card p { margin: 0; color: #5f6368; font-size: 13px; line-height: 1.55; }
+  .mock-shell { height: 360px; background: #fafafa; border-bottom: 1px solid #e5e7eb; display: flex; overflow: hidden; }
+  .mock-side { width: 92px; background: #f4f4f5; border-right: 1px solid #e5e7eb; padding: 12px 9px; }
+  .mock-side-line { height: 8px; background: #d4d4d8; border-radius: 999px; margin-bottom: 9px; }
+  .mock-main { flex: 1; padding: 14px; min-width: 0; }
+  .mock-top { height: 30px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .mock-title { width: 88px; height: 10px; background: #111827; border-radius: 999px; }
+  .mock-search { width: 118px; height: 18px; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 999px; }
+  .note-stack { column-count: 2; column-gap: 10px; }
+  .note-tile { break-inside: avoid; background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+  .note-tile.tall { min-height: 118px; }
+  .note-tile.mid { min-height: 92px; }
+  .note-line { height: 7px; background: #e5e7eb; border-radius: 999px; margin-bottom: 7px; }
+  .note-line.dark { background: #9ca3af; width: 68%; }
+  .editor-shell { height: 360px; background: white; border-bottom: 1px solid #e5e7eb; position: relative; overflow: hidden; }
+  .editor-panel { margin: 24px auto 0; width: 72%; height: 260px; border: 1px solid #e5e7eb; border-radius: 14px; background: #fff; box-shadow: 0 10px 28px rgba(0,0,0,.06); padding: 20px; }
+  .doc-line { height: 8px; background: #e5e7eb; border-radius: 999px; margin-bottom: 12px; }
+  .doc-line.heading { height: 14px; background: #111827; width: 55%; }
+  .drawer { position: absolute; inset: 0 auto 0 0; width: 36%; background: #fafafa; border-right: 1px solid #e5e7eb; padding: 14px; box-shadow: 8px 0 30px rgba(0,0,0,.05); }
+  .overlay { position: absolute; inset: 36px 42px; background: rgba(255,255,255,.96); border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 18px 50px rgba(0,0,0,.12); padding: 14px; }
+  .load-chip { display: inline-flex; height: 18px; width: 54px; border-radius: 999px; background: #111827; margin-top: 8px; }
+  .badge { display:inline-flex; align-items:center; height: 22px; padding: 0 8px; border-radius: 999px; background:#f3f4f6; color:#52525b; font-size:12px; margin-bottom: 10px; }
+  @media (max-width: 900px) { .moss-grid { grid-template-columns: 1fr; } .mock-shell, .editor-shell { height: 300px; } }
+</style>
+
+<h2>历史会话作为“笔记库”的入口方案</h2>
+<p class="subtitle">这些 mockup 都把 `canvas_snapshot` 当作核心内容：卡片展示编辑器文本摘要，点击后恢复该 conversation 的文档快照和会话线程，而不是展示聊天记录。</p>
+
+<div class="moss-grid">
+  <div class="moss-card" data-choice="full-library" onclick="toggleSelect(this)">
+    <div class="mock-shell">
+      <div class="mock-side">
+        <div class="mock-side-line" style="width:70%"></div>
+        <div class="mock-side-line"></div>
+        <div class="mock-side-line" style="width:62%"></div>
+        <div class="mock-side-line" style="margin-top:24px;width:78%"></div>
+        <div class="mock-side-line" style="width:58%"></div>
+      </div>
+      <div class="mock-main">
+        <div class="mock-top"><div class="mock-title"></div><div class="mock-search"></div></div>
+        <div class="note-stack">
+          <div class="note-tile tall"><div class="note-line dark"></div><div class="note-line"></div><div class="note-line" style="width:88%"></div><div class="note-line" style="width:72%"></div><span class="load-chip"></span></div>
+          <div class="note-tile mid"><div class="note-line dark" style="width:52%"></div><div class="note-line"></div><div class="note-line" style="width:66%"></div></div>
+          <div class="note-tile mid"><div class="note-line dark" style="width:74%"></div><div class="note-line"></div><div class="note-line" style="width:90%"></div></div>
+          <div class="note-tile tall"><div class="note-line dark" style="width:61%"></div><div class="note-line"></div><div class="note-line" style="width:78%"></div><div class="note-line" style="width:56%"></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="moss-card-body">
+      <span class="badge">A · 独立笔记库</span>
+      <h3>复用 Blueprint 的 library 体验</h3>
+      <p>主编辑器之外增加一个完整 Library 视图。适合搜索、网格/列表切换、以后加星标/文件夹。推荐作为第一版主路径。</p>
+    </div>
+  </div>
+
+  <div class="moss-card" data-choice="editor-drawer" onclick="toggleSelect(this)">
+    <div class="editor-shell">
+      <div class="editor-panel">
+        <div class="doc-line heading"></div>
+        <div class="doc-line"></div>
+        <div class="doc-line" style="width:84%"></div>
+        <div class="doc-line" style="width:66%"></div>
+        <div class="doc-line" style="margin-top:28px;width:92%"></div>
+        <div class="doc-line" style="width:72%"></div>
+      </div>
+      <div class="drawer">
+        <div class="mock-top"><div class="mock-title" style="width:66px"></div></div>
+        <div class="note-tile mid"><div class="note-line dark"></div><div class="note-line"></div><div class="note-line" style="width:70%"></div></div>
+        <div class="note-tile mid"><div class="note-line dark" style="width:60%"></div><div class="note-line"></div></div>
+        <div class="note-tile mid"><div class="note-line dark" style="width:78%"></div><div class="note-line" style="width:82%"></div></div>
+      </div>
+    </div>
+    <div class="moss-card-body">
+      <span class="badge">B · 编辑器侧栏</span>
+      <h3>在写作页左侧展开历史</h3>
+      <p>不用离开写作上下文，切换快。但会挤压沉浸式编辑区，移动端和全屏模式的边界更复杂。</p>
+    </div>
+  </div>
+
+  <div class="moss-card" data-choice="editor-overlay" onclick="toggleSelect(this)">
+    <div class="editor-shell">
+      <div class="editor-panel">
+        <div class="doc-line heading"></div>
+        <div class="doc-line"></div>
+        <div class="doc-line" style="width:90%"></div>
+        <div class="doc-line" style="width:74%"></div>
+        <div class="doc-line" style="margin-top:28px;width:84%"></div>
+        <div class="doc-line" style="width:63%"></div>
+      </div>
+      <div class="overlay">
+        <div class="mock-top"><div class="mock-title" style="width:112px"></div><div class="mock-search" style="width:86px"></div></div>
+        <div class="note-stack">
+          <div class="note-tile mid"><div class="note-line dark"></div><div class="note-line"></div><div class="note-line" style="width:60%"></div></div>
+          <div class="note-tile mid"><div class="note-line dark" style="width:58%"></div><div class="note-line"></div></div>
+          <div class="note-tile mid"><div class="note-line dark" style="width:72%"></div><div class="note-line" style="width:80%"></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="moss-card-body">
+      <span class="badge">C · 覆盖层</span>
+      <h3>快捷历史面板</h3>
+      <p>像文件切换器一样轻量，适合最近笔记和搜索。长期管理能力弱，容易变成只读入口。</p>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 22px;">
+  <h3>我倾向的第一版</h3>
+  <p>先做 A：独立 Library 页面/视图。后端新增“列出笔记会话”和“读取某个会话快照”接口；前端点击卡片时切换 `currentConversationId`，把该 conversation 最新 checkpoint 里的 `canvas_snapshot` 放回 Tiptap 编辑器。B 或 C 可以在 A 的数据接口稳定后再作为快捷入口。</p>
+</div>

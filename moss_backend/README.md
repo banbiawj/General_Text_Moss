@@ -94,6 +94,15 @@ Example `dom_mutation` data:
 }
 ```
 
+### Notes
+
+- `GET /api/v1/notes`: list note summaries for the library.
+- `POST /api/v1/notes`: create an empty note and default AI conversation.
+- `GET /api/v1/notes/{note_id}`: load a full note snapshot for the editor.
+- `PUT /api/v1/notes/{note_id}/snapshot`: save the editor HTML snapshot and update title/preview metadata.
+
+When notes are first initialized, legacy conversations are attached to generated notes. If the LangGraph checkpoint database has a latest non-empty `canvas_snapshot` write for a legacy conversation, the empty generated note is hydrated from that snapshot. Normal editor saves and note-scoped chat requests then keep `notes.canvas_snapshot` current.
+
 ### `POST /api/document/upload`
 
 Multipart upload under field `file`. Supports `.txt`, `.md`, `.markdown`, `.docx`, and `.pdf`. The parser returns plain text plus HTML, and wraps top-level blocks with generated `moss-block-*` IDs when needed.

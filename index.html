@@ -106,6 +106,12 @@
                     <i class="fa-solid fa-download text-[11px]"></i>
                     <span class="hidden sm:inline">Export</span>
                 </button>
+                <button @click="openLibrary"
+                        class="text-xs bg-white border border-gray-200 text-gray-700 px-3 md:px-4 py-2.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm font-medium flex items-center gap-2"
+                        title="打开笔记库">
+                    <i class="fa-regular fa-folder-open text-[11px]"></i>
+                    <span class="hidden sm:inline">Library</span>
+                </button>
             </div>
         </div>
 
@@ -243,7 +249,17 @@
         setup() {
             const sessionId = localStorage.getItem('moss-session-id') || `session-${makeId()}`;
             localStorage.setItem('moss-session-id', sessionId);
-            const currentConversationId = ref(localStorage.getItem('moss-current-conversation-id') || '');
+            const urlParams = new URLSearchParams(window.location.search);
+            const initialNoteIdFromUrl = urlParams.get('note_id') || '';
+            const initialConversationIdFromUrl = urlParams.get('conversation_id') || '';
+            const currentNoteId = ref(initialNoteIdFromUrl || localStorage.getItem('moss-current-note-id') || '');
+            const currentConversationId = ref(initialConversationIdFromUrl || localStorage.getItem('moss-current-conversation-id') || '');
+
+            const setCurrentNoteId = (noteId) => {
+                if (!noteId) return;
+                currentNoteId.value = noteId;
+                localStorage.setItem('moss-current-note-id', noteId);
+            };
 
             const setCurrentConversationId = (conversationId) => {
                 if (!conversationId) return;
@@ -251,11 +267,21 @@
                 localStorage.setItem('moss-current-conversation-id', conversationId);
             };
 
+            const syncNoteUrl = () => {
+                if (!currentNoteId.value || !currentConversationId.value) return;
+                const params = new URLSearchParams(window.location.search);
+                params.set('note_id', currentNoteId.value);
+                params.set('conversation_id', currentConversationId.value);
+                window.history.replaceState({}, '', `/?${params.toString()}`);
+            };
+
             const inputText = ref('');
             const isModifying = ref(false);
             const isThinking = ref(false);
             const isFullScreen = ref(false);
             const isSaving = ref(false);
+            const saveStatus = ref('idle');
+            const noteLoadError = ref('');
             const documentTitle = ref('Document.md');
 
             const defaultPanelHeight = window.innerHeight * 0.55;
@@ -273,6 +299,8 @@
             let lastTopLevelSignature = '';
             let idMaintenanceQueued = false;
             let isMaintainingDocumentIds = false;
+            let autosaveTimer = null;
+            let lastSavedSnapshot = '';
 
             const showAIPopup = ref(false);
             const aiPopupPos = ref({ top: 0, left: 0 });
@@ -589,20 +617,77 @@
                 if (container) container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
             };
 
+            const createNote = async () => {
+                const response = await fetch(apiUrl('/api/v1/notes'), { method: 'POST' });
+                if (!response.ok) throw new Error(await response.text());
+                const payload = await response.json();
+                setCurrentNoteId(payload.note_id);
+                setCurrentConversationId(payload.default_conversation_id);
+                syncNoteUrl();
+                return payload;
+            };
+
+            const loadCurrentNote = async () => {
+                if (!currentNoteId.value) {
+                    await createNote();
+                    contentHTML.value = '<p></p>';
+                    lastSavedSnapshot = '';
+                    documentTitle.value = 'Untitled note';
+                    return;
+                }
+
+                const response = await fetch(apiUrl(`/api/v1/notes/${encodeURIComponent(currentNoteId.value)}`));
+                if (!response.ok) throw new Error(await response.text());
+                const note = await response.json();
+                setCurrentNoteId(note.note_id);
+                setCurrentConversationId(initialConversationIdFromUrl || note.default_conversation_id);
+                syncNoteUrl();
+                documentTitle.value = note.title || 'Untitled note';
+                contentHTML.value = note.canvas_snapshot || '<p></p>';
+                lastSavedSnapshot = note.canvas_snapshot || '';
+            };
+
+            const persistNoteSnapshot = async ({ immediate = false } = {}) => {
+                if (!currentNoteId.value || !tiptapEditor) return;
+                contentHTML.value = tiptapEditor.getHTML();
+                if (contentHTML.value === lastSavedSnapshot) return;
+                saveStatus.value = 'saving';
+                const response = await fetch(apiUrl(`/api/v1/notes/${encodeURIComponent(currentNoteId.value)}/snapshot`), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ canvas_snapshot: contentHTML.value })
+                });
+                if (!response.ok) {
+                    saveStatus.value = 'error';
+                    throw new Error(await response.text());
+                }
+                const saved = await response.json();
+                lastSavedSnapshot = contentHTML.value;
+                documentTitle.value = saved.title || documentTitle.value;
+                saveStatus.value = 'saved';
+            };
+
+            const queueAutosave = () => {
+                if (autosaveTimer) window.clearTimeout(autosaveTimer);
+                autosaveTimer = window.setTimeout(() => {
+                    autosaveTimer = null;
+                    persistNoteSnapshot().catch(() => {});
+                }, 1200);
+            };
+
+            const flushAutosave = async () => {
+                if (autosaveTimer) {
+                    window.clearTimeout(autosaveTimer);
+                    autosaveTimer = null;
+                }
+                await persistNoteSnapshot({ immediate: true });
+            };
+
             const saveContent = async () => {
                 if (isSaving.value) return;
                 isSaving.value = true;
                 try {
-                    const response = await fetch(apiUrl('/api/document/save'), {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            docId: 'doc-current',
-                            content: contentHTML.value,
-                            timestamp: Date.now()
-                        })
-                    });
-                    if (!response.ok) throw new Error(await response.text());
+                    await flushAutosave();
                 } catch (error) {
                     messages.value.push({ role: 'ai', content: `保存失败：${error.message}` });
                     await nextTick();
@@ -636,6 +721,7 @@
                     tiptapEditor.commands.setContent(contentHTML.value);
                     cleanupTemporaryAnchors();
                     ensureTopLevelBlockIds();
+                    await persistNoteSnapshot({ immediate: true }).catch(() => {});
                     messages.value.push({ role: 'ai', content: `已导入 ${documentTitle.value}。` });
                     await nextTick();
                     scrollToBottom();
@@ -814,6 +900,7 @@
                 contentHTML.value = root.innerHTML;
                 tiptapEditor.commands.setContent(contentHTML.value);
                 ensureTopLevelBlockIds();
+                await persistNoteSnapshot({ immediate: true }).catch(() => {});
 
                 await nextTick();
                 setTimeout(() => {
@@ -901,13 +988,17 @@
                 };
 
                 try {
+                    if (!currentNoteId.value || !currentConversationId.value) {
+                        await createNote();
+                    }
                     requestAnchors = prepareAgentRequestAnchors(explicitFocusId);
                     const response = await fetch(apiUrl('/api/v1/chat-stream'), {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             session_id: sessionId,
-                            ...(currentConversationId.value ? { conversation_id: currentConversationId.value } : {}),
+                            note_id: currentNoteId.value,
+                            conversation_id: currentConversationId.value,
                             user_input: currentInput,
                             focus_element_id: requestAnchors.focusElementId,
                             focus_block_id: requestAnchors.focusBlockId,
@@ -1037,7 +1128,22 @@
                 if (panelHeight.value > maxHeight) panelHeight.value = maxHeight;
             };
 
-            onMounted(() => {
+            const openLibrary = async () => {
+                try {
+                    await flushAutosave();
+                } catch {}
+                window.location.href = '/library';
+            };
+
+            onMounted(async () => {
+                try {
+                    await loadCurrentNote();
+                } catch (error) {
+                    noteLoadError.value = error.message || '加载笔记失败';
+                    messages.value.push({ role: 'ai', content: `加载笔记失败：${noteLoadError.value}` });
+                    contentHTML.value = '<p></p>';
+                }
+
                 tiptapEditor = new Editor({
                     element: editorContainer.value,
                     extensions: [
@@ -1063,6 +1169,7 @@
                     },
                     onUpdate: ({ editor }) => {
                         contentHTML.value = editor.getHTML();
+                        if (!isMaintainingDocumentIds) queueAutosave();
                         if (isMaintainingDocumentIds) return;
                         const signature = topLevelStructureSignature();
                         if (signature !== lastTopLevelSignature) {
@@ -1084,6 +1191,7 @@
                 window.removeEventListener('resize', handleResize);
                 document.removeEventListener('mousemove', handleDragging);
                 document.removeEventListener('mouseup', stopDragging);
+                if (autosaveTimer) window.clearTimeout(autosaveTimer);
                 tiptapEditor?.destroy();
             });
 
@@ -1114,8 +1222,13 @@
                 submitAIPopup,
                 closeAIPopup,
                 documentTitle,
+                currentNoteId,
+                setCurrentNoteId,
                 currentConversationId,
-                setCurrentConversationId
+                setCurrentConversationId,
+                saveStatus,
+                noteLoadError,
+                openLibrary
             };
         }
     }).mount('#app');

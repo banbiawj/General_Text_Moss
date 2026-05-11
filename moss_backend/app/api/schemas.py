@@ -7,6 +7,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.services.conversations import is_valid_conversation_id
+from app.services.notes import is_valid_note_id
 
 
 class ChatContext(BaseModel):
@@ -25,6 +26,7 @@ class ChatRequest(BaseModel):
     """
 
     session_id: str = Field(default_factory=lambda: f"session-{uuid4().hex}")
+    note_id: str | None = None
     conversation_id: str | None = None
     user_input: str = ""
     focus_element_id: str | None = None
@@ -45,9 +47,50 @@ class ChatRequest(BaseModel):
                 self.focus_element_id = self.context.cursor_position
         if self.conversation_id is not None and not is_valid_conversation_id(self.conversation_id):
             raise ValueError("conversation_id must match conv-[A-Za-z0-9_-]{8,64}")
+        if self.note_id is not None and not is_valid_note_id(self.note_id):
+            raise ValueError("note_id must match note-[A-Za-z0-9_-]{8,64}")
         if not self.user_input.strip():
             raise ValueError("user_input/message cannot be empty")
         return self
+
+
+class NoteSummaryResponse(BaseModel):
+    note_id: str
+    default_conversation_id: str
+    title: str
+    preview_text: str
+    created_at: str
+    updated_at: str
+
+
+class NoteListResponse(BaseModel):
+    notes: list[NoteSummaryResponse]
+
+
+class CreateNoteResponse(BaseModel):
+    note_id: str
+    default_conversation_id: str
+
+
+class NoteDetailResponse(BaseModel):
+    note_id: str
+    default_conversation_id: str
+    title: str
+    canvas_snapshot: str
+    preview_text: str
+    created_at: str
+    updated_at: str
+
+
+class SaveNoteSnapshotRequest(BaseModel):
+    canvas_snapshot: str = ""
+
+
+class SaveNoteSnapshotResponse(BaseModel):
+    note_id: str
+    title: str
+    preview_text: str
+    updated_at: str
 
 
 class UploadResponse(BaseModel):

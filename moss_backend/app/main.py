@@ -46,3 +46,15 @@ async def frontend_entry():
     if index_path.exists():
         return FileResponse(index_path)
     return JSONResponse({"status": "ok", "message": "Moss backend is running"})
+
+
+@app.get("/library", include_in_schema=False)
+@app.get("/library.html", include_in_schema=False)
+async def library_entry():
+    library_path = Path(__file__).resolve().parents[2] / "library.html"
+    if library_path.exists():
+        return FileResponse(library_path)
+    return JSONResponse(
+        {"status": "not_found", "message": "library.html is missing"},
+        status_code=404,
+    )

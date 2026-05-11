@@ -12,11 +12,17 @@ from markdownify import markdownify as html_to_markdown
 from app.agent.graph import stream_agent_events
 from app.api.schemas import (
     ChatRequest,
+    CreateNoteResponse,
     DocumentUploadResponse,
     ExportDocumentRequest,
     HealthResponse,
+    NoteDetailResponse,
+    NoteListResponse,
+    NoteSummaryResponse,
     SaveDocumentRequest,
     SaveDocumentResponse,
+    SaveNoteSnapshotRequest,
+    SaveNoteSnapshotResponse,
     UploadResponse,
 )
 from app.core.config import get_settings
@@ -26,6 +32,7 @@ from app.services.conversations import (
     ConversationStore,
     InvalidConversationId,
 )
+from app.services.notes import InvalidNoteId, NoteStore
 from app.tools.document_tools import DOWNLOAD_CACHE
 
 
@@ -38,37 +45,139 @@ def get_conversation_store() -> ConversationStore:
     return ConversationStore(settings.conversation_metadata_path)
 
 
+def get_note_store() -> NoteStore:
+    settings = get_settings()
+    return NoteStore(
+        settings.conversation_metadata_path,
+        checkpoint_db_path=settings.langgraph_checkpoint_path,
+    )
+
+
 @api_router.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     return HealthResponse()
 
 
+@api_router.get("/notes", response_model=NoteListResponse)
+async def list_notes() -> NoteListResponse:
+    notes = get_note_store().list_notes(DEFAULT_USER_ID)
+    return NoteListResponse(
+        notes=[
+            NoteSummaryResponse(
+                note_id=note.note_id,
+                default_conversation_id=note.default_conversation_id,
+                title=note.title,
+                preview_text=note.preview_text,
+                created_at=note.created_at,
+                updated_at=note.updated_at,
+            )
+            for note in notes
+        ]
+    )
+
+
+@api_router.post("/notes", response_model=CreateNoteResponse)
+async def create_note() -> CreateNoteResponse:
+    created = get_note_store().create_note(DEFAULT_USER_ID)
+    return CreateNoteResponse(
+        note_id=created.note.note_id,
+        default_conversation_id=created.default_conversation.conversation_id,
+    )
+
+
+@api_router.get("/notes/{note_id}", response_model=NoteDetailResponse)
+async def get_note(note_id: str) -> NoteDetailResponse:
+    try:
+        note = get_note_store().get_note(DEFAULT_USER_ID, note_id)
+    except InvalidNoteId as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return NoteDetailResponse(
+        note_id=note.note_id,
+        default_conversation_id=note.default_conversation_id,
+        title=note.title,
+        canvas_snapshot=note.canvas_snapshot,
+        preview_text=note.preview_text,
+        created_at=note.created_at,
+        updated_at=note.updated_at,
+    )
+
+
+@api_router.put("/notes/{note_id}/snapshot", response_model=SaveNoteSnapshotResponse)
+async def save_note_snapshot(
+    note_id: str,
+    payload: SaveNoteSnapshotRequest,
+) -> SaveNoteSnapshotResponse:
+    try:
+        saved = get_note_store().save_snapshot(
+            DEFAULT_USER_ID,
+            note_id,
+            payload.canvas_snapshot,
+        )
+    except InvalidNoteId as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return SaveNoteSnapshotResponse(
+        note_id=saved.note_id,
+        title=saved.title,
+        preview_text=saved.preview_text,
+        updated_at=saved.updated_at,
+    )
+
+
 @api_router.post("/chat-stream")
 async def chat_stream(payload: ChatRequest, request: Request) -> StreamingResponse:
     try:
-        resolved = get_conversation_store().resolve(
-            user_id=DEFAULT_USER_ID,
-            conversation_id=payload.conversation_id,
-        )
+        if payload.note_id and payload.conversation_id:
+            note_store = get_note_store()
+            conversation = note_store.verify_conversation_for_note(
+                DEFAULT_USER_ID,
+                payload.note_id,
+                payload.conversation_id,
+            )
+            note_store.save_snapshot(
+                DEFAULT_USER_ID,
+                payload.note_id,
+                payload.canvas_snapshot,
+            )
+            resolved_conversation_id = conversation.conversation_id
+            resolved_user_id = conversation.user_id
+            emit_conversation_event = False
+        else:
+            resolved = get_conversation_store().resolve(
+                user_id=DEFAULT_USER_ID,
+                conversation_id=payload.conversation_id,
+            )
+            resolved_conversation_id = resolved.record.conversation_id
+            resolved_user_id = resolved.record.user_id
+            emit_conversation_event = resolved.created
     except InvalidConversationId as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except InvalidNoteId as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     async def generator():
         try:
-            if resolved.created:
+            if emit_conversation_event:
                 yield _sse(
                     "conversation",
                     {
-                        "conversation_id": resolved.record.conversation_id,
-                        "user_id": resolved.record.user_id,
+                        "conversation_id": resolved_conversation_id,
+                        "user_id": resolved_user_id,
                     },
                 )
 
             async for event in stream_agent_events(
                 session_id=payload.session_id,
-                conversation_id=resolved.record.conversation_id,
+                conversation_id=resolved_conversation_id,
                 user_input=payload.user_input,
                 focus_element_id=payload.focus_element_id,
                 focus_block_id=payload.focus_block_id,

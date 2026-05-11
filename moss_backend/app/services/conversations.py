@@ -24,6 +24,8 @@ class ConversationRecord:
     title: str
     created_at: str
     updated_at: str
+    note_id: str | None = None
+    is_default: bool = False
 
 
 @dataclass(frozen=True)
@@ -72,7 +74,7 @@ class ConversationStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT conversation_id, user_id, title, created_at, updated_at
+                SELECT *
                 FROM conversations
                 WHERE conversation_id = ?
                 """,
@@ -100,9 +102,10 @@ class ConversationStore:
             conn.execute(
                 """
                 INSERT INTO conversations (
-                    conversation_id, user_id, title, created_at, updated_at
+                    conversation_id, user_id, title, created_at, updated_at,
+                    note_id, is_default
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     conversation_id,
@@ -110,6 +113,8 @@ class ConversationStore:
                     DEFAULT_CONVERSATION_TITLE,
                     now,
                     now,
+                    None,
+                    0,
                 ),
             )
             conn.commit()
@@ -141,10 +146,22 @@ class ConversationStore:
                     user_id TEXT NOT NULL,
                     title TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    note_id TEXT,
+                    is_default INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
+            columns = self._table_columns(conn, "conversations")
+            if "note_id" not in columns:
+                conn.execute("ALTER TABLE conversations ADD COLUMN note_id TEXT")
+            if "is_default" not in columns:
+                conn.execute(
+                    """
+                    ALTER TABLE conversations
+                    ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0
+                    """
+                )
             conn.commit()
 
     def _connect(self) -> sqlite3.Connection:
@@ -154,10 +171,21 @@ class ConversationStore:
         return conn
 
     def _record_from_row(self, row: sqlite3.Row) -> ConversationRecord:
+        columns = set(row.keys())
         return ConversationRecord(
             conversation_id=str(row["conversation_id"]),
             user_id=str(row["user_id"]),
             title=str(row["title"]),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
+            note_id=(
+                None
+                if "note_id" not in columns or row["note_id"] is None
+                else str(row["note_id"])
+            ),
+            is_default=bool(row["is_default"]) if "is_default" in columns else False,
         )
+
+    def _table_columns(self, conn: sqlite3.Connection, table_name: str) -> set[str]:
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        return {str(row["name"]) for row in rows}

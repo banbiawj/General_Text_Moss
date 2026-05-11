@@ -1,0 +1,21 @@
+{"type":"server-started","port":55838,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:55838","screen_dir":"E:\\project-VScode-Moss\\General_Text_Moss\\.superpowers\\brainstorm\\codex-20260511155245\\content","state_dir":"E:\\project-VScode-Moss\\General_Text_Moss\\.superpowers\\brainstorm\\codex-20260511155245\\state"}
+{"type":"screen-added","file":"E:\\project-VScode-Moss\\General_Text_Moss\\.superpowers\\brainstorm\\codex-20260511155245\\content\\history-note-list-layout.html"}
+{"type":"screen-added","file":"E:\\project-VScode-Moss\\General_Text_Moss\\.superpowers\\brainstorm\\codex-20260511155245\\content\\waiting-after-layout-choice.html"}
+{"type":"server-stopped","reason":"idle timeout"}
+node:fs:1931
+  binding.unlink(getValidatedPath(path));
+          ^
+
+Error: EPERM: operation not permitted, unlink 'E:\project-VScode-Moss\General_Text_Moss\.superpowers\brainstorm\codex-20260511155245\state\server-info'
+    at Object.unlinkSync (node:fs:1931:11)
+    at shutdown (C:\Users\86151\.codex\plugins\cache\openai-curated\superpowers\63976030\skills\brainstorming\scripts\server.cjs:304:37)
+    at Timeout._onTimeout (C:\Users\86151\.codex\plugins\cache\openai-curated\superpowers\63976030\skills\brainstorming\scripts\server.cjs:322:59)
+    at listOnTimeout (node:internal/timers:605:17)
+    at process.processTimers (node:internal/timers:541:7) {
+  errno: -4048,
+  code: 'EPERM',
+  syscall: 'unlink',
+  path: 'E:\\project-VScode-Moss\\General_Text_Moss\\.superpowers\\brainstorm\\codex-20260511155245\\state\\server-info'
+}
+
+Node.js v24.14.1

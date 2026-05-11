@@ -93,6 +93,15 @@ class SaveNoteSnapshotResponse(BaseModel):
     updated_at: str
 
 
+class ConversationMessageResponse(BaseModel):
+    role: Literal["user", "ai"]
+    content: str
+
+
+class ConversationMessagesResponse(BaseModel):
+    messages: list[ConversationMessageResponse]
+
+
 class UploadResponse(BaseModel):
     status: str = "success"
     filename: str

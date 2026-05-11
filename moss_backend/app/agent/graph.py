@@ -382,6 +382,47 @@ def _sanitize_output(output: Any) -> Any:
         return str(output)
 
 
+def _frontend_message_role(message: Any) -> str | None:
+    if isinstance(message, HumanMessage):
+        return "user"
+    if isinstance(message, AIMessage):
+        return "ai"
+    return None
+
+
+def _message_content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "\n".join(part for part in parts if part)
+    return str(content or "")
+
+
+async def get_conversation_messages(
+    compiled_graph: Any,
+    conversation_id: str,
+) -> list[dict[str, str]]:
+    """Return checkpointed human/AI messages for frontend chat rendering."""
+    state = await compiled_graph.aget_state(
+        {"configurable": {"thread_id": conversation_id}},
+    )
+    values = getattr(state, "values", {}) or {}
+    messages = values.get("messages", [])
+    history: list[dict[str, str]] = []
+    for message in messages:
+        role = _frontend_message_role(message)
+        content = _message_content_text(getattr(message, "content", ""))
+        if role and content:
+            history.append({"role": role, "content": content})
+    return history
+
+
 async def stream_agent_events(
     session_id: str,
     conversation_id: str,

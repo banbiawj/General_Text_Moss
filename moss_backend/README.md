@@ -100,6 +100,7 @@ Example `dom_mutation` data:
 - `POST /api/v1/notes`: create an empty note and default AI conversation.
 - `GET /api/v1/notes/{note_id}`: load a full note snapshot for the editor.
 - `PUT /api/v1/notes/{note_id}/snapshot`: save the editor HTML snapshot and update title/preview metadata.
+- `GET /api/v1/notes/{note_id}/conversations/{conversation_id}/messages`: load persisted human/AI chat messages for the editor chat panel. The route verifies that the conversation belongs to the note.
 
 When notes are first initialized, legacy conversations are attached to generated notes. If the LangGraph checkpoint database has a latest non-empty `canvas_snapshot` write for a legacy conversation, the empty generated note is hydrated from that snapshot. Normal editor saves and note-scoped chat requests then keep `notes.canvas_snapshot` current.
 

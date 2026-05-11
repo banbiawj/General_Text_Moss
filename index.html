@@ -307,12 +307,13 @@
             const aiPopupInput = ref('');
             const aiPopupInputRef = ref(null);
 
-            const messages = ref([
+            const defaultMessages = () => [
                 {
                     role: 'ai',
                     content: 'Moss 已连接到后端 SSE 协议。可以直接输入指令，或在文档中使用 Ctrl + / 进行局部伴写。'
                 }
-            ]);
+            ];
+            const messages = ref(defaultMessages());
 
             const initialContent = `
                 <h1>欢迎使用 moss</h1>
@@ -633,6 +634,7 @@
                     contentHTML.value = '<p></p>';
                     lastSavedSnapshot = '';
                     documentTitle.value = 'Untitled note';
+                    messages.value = defaultMessages();
                     return;
                 }
 
@@ -645,6 +647,21 @@
                 documentTitle.value = note.title || 'Untitled note';
                 contentHTML.value = note.canvas_snapshot || '<p></p>';
                 lastSavedSnapshot = note.canvas_snapshot || '';
+                await loadConversationMessages();
+            };
+
+            const loadConversationMessages = async () => {
+                if (!currentNoteId.value || !currentConversationId.value) {
+                    messages.value = defaultMessages();
+                    return;
+                }
+                const response = await fetch(apiUrl(`/api/v1/notes/${encodeURIComponent(currentNoteId.value)}/conversations/${encodeURIComponent(currentConversationId.value)}/messages`));
+                if (!response.ok) throw new Error(await response.text());
+                const payload = await response.json();
+                const history = Array.isArray(payload.messages) ? payload.messages : [];
+                messages.value = history.length ? history : defaultMessages();
+                await nextTick();
+                scrollToBottom();
             };
 
             const persistNoteSnapshot = async ({ immediate = false } = {}) => {

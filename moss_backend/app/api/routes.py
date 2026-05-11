@@ -10,8 +10,10 @@ from fastapi.responses import Response, StreamingResponse
 from markdownify import markdownify as html_to_markdown
 
 from app.agent.graph import stream_agent_events
+from app.agent.graph import get_conversation_messages
 from app.api.schemas import (
     ChatRequest,
+    ConversationMessagesResponse,
     CreateNoteResponse,
     DocumentUploadResponse,
     ExportDocumentRequest,
@@ -125,6 +127,41 @@ async def save_note_snapshot(
         preview_text=saved.preview_text,
         updated_at=saved.updated_at,
     )
+
+
+@api_router.get(
+    "/notes/{note_id}/conversations/{conversation_id}/messages",
+    response_model=ConversationMessagesResponse,
+)
+async def list_conversation_messages(
+    note_id: str,
+    conversation_id: str,
+    request: Request,
+) -> ConversationMessagesResponse:
+    try:
+        conversation = get_note_store().verify_conversation_for_note(
+            DEFAULT_USER_ID,
+            note_id,
+            conversation_id,
+        )
+        compiled_graph = getattr(request.app.state, "agent_graph", None)
+        if compiled_graph is None:
+            return ConversationMessagesResponse(messages=[])
+        messages = await get_conversation_messages(
+            compiled_graph,
+            conversation.conversation_id,
+        )
+    except InvalidConversationId as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except InvalidNoteId as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return ConversationMessagesResponse(messages=messages)
 
 
 @api_router.post("/chat-stream")

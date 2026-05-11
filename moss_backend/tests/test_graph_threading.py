@@ -7,13 +7,14 @@ from pathlib import Path
 from typing import Any, AsyncGenerator
 from uuid import uuid4
 
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from app.agent.checkpointing import open_sqlite_checkpointer
 from app.core.config import get_settings
 from app.agent.graph import (
     _build_execute_messages,
     compile_agent_graph,
+    get_conversation_messages,
     stream_agent_events,
 )
 
@@ -155,6 +156,50 @@ class GraphThreadingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("isolated turn", same_contents)
         self.assertIn("isolated turn", other_contents)
         self.assertNotIn("first turn", other_contents)
+
+    async def test_get_conversation_messages_returns_frontend_chat_history(self) -> None:
+        temp_dir = self.make_temp_dir()
+        db_path = temp_dir / "checkpoints.sqlite3"
+        async with open_sqlite_checkpointer(db_path) as saver:
+            compiled_graph = compile_agent_graph(checkpointer=saver)
+            await compiled_graph.aupdate_state(
+                {"configurable": {"thread_id": "conv-history123"}},
+                {
+                    "messages": [
+                        HumanMessage(content="first user"),
+                        AIMessage(content="first ai"),
+                        ToolMessage(content="hidden tool", tool_call_id="tool-1"),
+                        HumanMessage(content="second user"),
+                    ]
+                },
+            )
+
+            messages = await get_conversation_messages(
+                compiled_graph,
+                "conv-history123",
+            )
+
+        self.assertEqual(
+            messages,
+            [
+                {"role": "user", "content": "first user"},
+                {"role": "ai", "content": "first ai"},
+                {"role": "user", "content": "second user"},
+            ],
+        )
+
+    async def test_get_conversation_messages_returns_empty_for_unknown_thread(self) -> None:
+        temp_dir = self.make_temp_dir()
+        db_path = temp_dir / "checkpoints.sqlite3"
+        async with open_sqlite_checkpointer(db_path) as saver:
+            compiled_graph = compile_agent_graph(checkpointer=saver)
+
+            messages = await get_conversation_messages(
+                compiled_graph,
+                "conv-missing123",
+            )
+
+        self.assertEqual(messages, [])
 
     def test_execute_messages_include_bounded_conversation_history(self) -> None:
         history = [HumanMessage(content=f"history {index}") for index in range(10)]

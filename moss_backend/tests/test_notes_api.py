@@ -21,13 +21,26 @@ class NotesApiTests(unittest.TestCase):
         self.addCleanup(lambda: shutil.rmtree(self.temp_dir, ignore_errors=True))
         self.store = NoteStore(self.temp_dir / "metadata.sqlite3")
         self.original_note_store_getter = getattr(routes, "get_note_store", None)
+        self.original_get_conversation_messages = routes.get_conversation_messages
         routes.get_note_store = lambda: self.store
+        routes.get_conversation_messages = self.fake_get_conversation_messages
 
     def tearDown(self) -> None:
         if self.original_note_store_getter is None:
             delattr(routes, "get_note_store")
         else:
             routes.get_note_store = self.original_note_store_getter
+        routes.get_conversation_messages = self.original_get_conversation_messages
+
+    async def fake_get_conversation_messages(
+        self,
+        compiled_graph: Any,
+        conversation_id: str,
+    ) -> list[dict[str, str]]:
+        return [
+            {"role": "user", "content": f"user:{conversation_id}"},
+            {"role": "ai", "content": f"ai:{conversation_id}"},
+        ]
 
     def request(self, method: str, path: str, **kwargs: Any):
         with TestClient(app) as client:
@@ -102,6 +115,46 @@ class NotesApiTests(unittest.TestCase):
             loaded.canvas_snapshot,
             "<h1>Saved title</h1><p>Saved body</p>",
         )
+
+    def test_get_conversation_messages_returns_note_chat_history(self) -> None:
+        created = self.store.create_note(DEFAULT_USER_ID)
+
+        response = self.request(
+            "GET",
+            (
+                f"/api/v1/notes/{created.note.note_id}/conversations/"
+                f"{created.default_conversation.conversation_id}/messages"
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json()["messages"],
+            [
+                {
+                    "role": "user",
+                    "content": f"user:{created.default_conversation.conversation_id}",
+                },
+                {
+                    "role": "ai",
+                    "content": f"ai:{created.default_conversation.conversation_id}",
+                },
+            ],
+        )
+
+    def test_get_conversation_messages_rejects_mismatched_note(self) -> None:
+        first = self.store.create_note(DEFAULT_USER_ID)
+        second = self.store.create_note(DEFAULT_USER_ID)
+
+        response = self.request(
+            "GET",
+            (
+                f"/api/v1/notes/{first.note.note_id}/conversations/"
+                f"{second.default_conversation.conversation_id}/messages"
+            ),
+        )
+
+        self.assertEqual(response.status_code, 409)
 
     def test_get_unknown_note_returns_404(self) -> None:
         response = self.request("GET", "/api/v1/notes/note-missing123")

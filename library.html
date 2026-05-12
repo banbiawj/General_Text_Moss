@@ -45,7 +45,7 @@
 
     <aside :class="[
         'fixed md:relative inset-y-0 left-0 z-50 w-64 bg-[#fafafa] border-r border-gray-200 flex-shrink-0 flex flex-col h-full transition-transform duration-300 ease-out',
-        isSidebarOpen ? 'translate-x-0 shadow-2xl md:shadow-none' : '-translate-x-full md:translate-x-0'
+        isSidebarOpen ? 'translate-x-0 shadow-2xl md:shadow-none' : '-translate-x-full md:-ml-64'
     ]">
         <div class="p-5 flex items-center justify-between">
             <div class="flex items-center gap-3 min-w-0">
@@ -54,8 +54,7 @@
                 </div>
                 <span class="font-semibold text-sm tracking-wide text-gray-800 truncate">moss notes</span>
             </div>
-            <button v-if="isMobile"
-                    @click="toggleSidebar"
+            <button @click="toggleSidebar"
                     class="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-200 text-gray-500 transition"
                     title="关闭侧边栏">
                 <i class="fa-solid fa-xmark text-sm"></i>
@@ -90,8 +89,8 @@
         <header class="h-16 px-4 md:px-8 flex items-center justify-between border-b border-gray-50 bg-white/80 backdrop-blur-md sticky top-0 z-20 gap-3">
             <div class="flex items-center gap-2 md:gap-4 flex-1 min-w-0">
                 <button @click.stop="toggleSidebar"
-                        class="md:hidden w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 hover:text-black transition-colors shrink-0"
-                        title="打开侧边栏">
+                        class="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 hover:text-black transition-colors shrink-0"
+                        :title="isSidebarOpen ? '关闭侧边栏' : '打开侧边栏'">
                     <i class="fa-solid fa-bars-staggered text-sm"></i>
                 </button>
                 <div class="flex items-center gap-2 text-sm shrink-0 whitespace-nowrap">
@@ -279,6 +278,7 @@
 
             const checkScreenSize = () => {
                 const mobile = window.innerWidth < 768;
+                if (mobile === isMobile.value) return;
                 isMobile.value = mobile;
                 isSidebarOpen.value = !mobile;
             };
@@ -335,13 +335,7 @@
                 isCreating.value = true;
                 actionError.value = '';
                 try {
-                    const response = await fetch(apiUrl('/api/v1/notes'), { method: 'POST' });
-                    if (!response.ok) throw new Error(await response.text());
-                    const payload = await response.json();
-                    openNote({
-                        note_id: payload.note_id,
-                        default_conversation_id: payload.default_conversation_id
-                    });
+                    window.location.href = '/?draft=1';
                 } catch (error) {
                     actionError.value = error.message || 'create failed';
                 } finally {

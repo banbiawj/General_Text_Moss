@@ -252,8 +252,13 @@
             const urlParams = new URLSearchParams(window.location.search);
             const initialNoteIdFromUrl = urlParams.get('note_id') || '';
             const initialConversationIdFromUrl = urlParams.get('conversation_id') || '';
-            const currentNoteId = ref(initialNoteIdFromUrl || localStorage.getItem('moss-current-note-id') || '');
-            const currentConversationId = ref(initialConversationIdFromUrl || localStorage.getItem('moss-current-conversation-id') || '');
+            const isDraftNote = ref(urlParams.get('draft') === '1');
+            const currentNoteId = ref(
+                isDraftNote.value ? '' : initialNoteIdFromUrl || localStorage.getItem('moss-current-note-id') || ''
+            );
+            const currentConversationId = ref(
+                isDraftNote.value ? '' : initialConversationIdFromUrl || localStorage.getItem('moss-current-conversation-id') || ''
+            );
 
             const setCurrentNoteId = (noteId) => {
                 if (!noteId) return;
@@ -270,6 +275,7 @@
             const syncNoteUrl = () => {
                 if (!currentNoteId.value || !currentConversationId.value) return;
                 const params = new URLSearchParams(window.location.search);
+                params.delete('draft');
                 params.set('note_id', currentNoteId.value);
                 params.set('conversation_id', currentConversationId.value);
                 window.history.replaceState({}, '', `/?${params.toString()}`);
@@ -625,13 +631,13 @@
                 const payload = await response.json();
                 setCurrentNoteId(payload.note_id);
                 setCurrentConversationId(payload.default_conversation_id);
+                isDraftNote.value = false;
                 syncNoteUrl();
                 return payload;
             };
 
             const loadCurrentNote = async () => {
-                if (!currentNoteId.value) {
-                    await createNote();
+                if (isDraftNote.value || !currentNoteId.value) {
                     contentHTML.value = '<p></p>';
                     lastSavedSnapshot = '';
                     documentTitle.value = 'Untitled note';
@@ -666,9 +672,25 @@
                 scrollToBottom();
             };
 
+            const isBlankSnapshot = (html) => {
+                const holder = document.createElement('div');
+                holder.innerHTML = html || '';
+                const text = (holder.textContent || '').replace(/\u00a0/g, ' ').trim();
+                if (text) return false;
+                return !holder.querySelector('img, video, audio, iframe, table, hr, pre, code');
+            };
+
+            const ensurePersistedNote = async (snapshot = '', { allowBlank = false } = {}) => {
+                if (currentNoteId.value && currentConversationId.value) return true;
+                if (!allowBlank && isBlankSnapshot(snapshot)) return false;
+                await createNote();
+                return true;
+            };
+
             const persistNoteSnapshot = async ({ immediate = false } = {}) => {
-                if (!currentNoteId.value || !tiptapEditor) return;
+                if (!tiptapEditor) return;
                 contentHTML.value = tiptapEditor.getHTML();
+                if (!(await ensurePersistedNote(contentHTML.value))) return;
                 if (contentHTML.value === lastSavedSnapshot) return;
                 saveStatus.value = 'saving';
                 const response = await fetch(apiUrl(`/api/v1/notes/${encodeURIComponent(currentNoteId.value)}/snapshot`), {
@@ -1008,9 +1030,11 @@
 
                 try {
                     if (!currentNoteId.value || !currentConversationId.value) {
-                        await createNote();
+                        const draftSnapshot = tiptapEditor ? tiptapEditor.getHTML() : contentHTML.value;
+                        contentHTML.value = draftSnapshot;
                     }
                     requestAnchors = prepareAgentRequestAnchors(explicitFocusId);
+                    await ensurePersistedNote(requestAnchors.canvasSnapshot, { allowBlank: true });
                     const response = await fetch(apiUrl('/api/v1/chat-stream'), {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },

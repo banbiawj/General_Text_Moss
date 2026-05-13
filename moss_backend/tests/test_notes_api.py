@@ -58,6 +58,10 @@ class NotesApiTests(unittest.TestCase):
             loaded.default_conversation_id,
             payload["default_conversation_id"],
         )
+        self.assertEqual(
+            loaded.active_conversation_id,
+            payload["default_conversation_id"],
+        )
 
     def test_list_notes_excludes_canvas_snapshot(self) -> None:
         created = self.store.create_note(DEFAULT_USER_ID)
@@ -74,6 +78,10 @@ class NotesApiTests(unittest.TestCase):
         self.assertEqual(len(notes), 1)
         self.assertEqual(notes[0]["note_id"], created.note.note_id)
         self.assertEqual(notes[0]["title"], "Library title")
+        self.assertEqual(
+            notes[0]["active_conversation_id"],
+            created.default_conversation.conversation_id,
+        )
         self.assertNotIn("canvas_snapshot", notes[0])
 
     def test_get_note_returns_full_snapshot(self) -> None:
@@ -96,6 +104,14 @@ class NotesApiTests(unittest.TestCase):
         self.assertEqual(
             payload["canvas_snapshot"],
             "<h1>Loaded title</h1><p>Loaded body</p>",
+        )
+        self.assertEqual(
+            payload["active_conversation_id"],
+            created.default_conversation.conversation_id,
+        )
+        self.assertEqual(
+            payload["last_opened_conversation_id"],
+            created.default_conversation.conversation_id,
         )
 
     def test_save_snapshot_updates_note(self) -> None:
@@ -155,6 +171,70 @@ class NotesApiTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 409)
+
+    def test_list_note_conversations_returns_attached_discussions(self) -> None:
+        created = self.store.create_note(DEFAULT_USER_ID)
+        discussion = self.store.create_conversation_for_note(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+        )
+
+        response = self.request(
+            "GET",
+            f"/api/v1/notes/{created.note.note_id}/conversations",
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["active_conversation_id"], discussion.conversation_id)
+        self.assertEqual(
+            [item["conversation_id"] for item in payload["conversations"]],
+            [
+                created.default_conversation.conversation_id,
+                discussion.conversation_id,
+            ],
+        )
+        self.assertTrue(payload["conversations"][0]["is_default"])
+        self.assertFalse(payload["conversations"][1]["is_default"])
+
+    def test_create_note_conversation_adds_non_default_discussion(self) -> None:
+        created = self.store.create_note(DEFAULT_USER_ID)
+
+        response = self.request(
+            "POST",
+            f"/api/v1/notes/{created.note.note_id}/conversations",
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["note_id"], created.note.note_id)
+        self.assertFalse(payload["is_default"])
+        loaded = self.store.get_note(DEFAULT_USER_ID, created.note.note_id)
+        self.assertEqual(loaded.active_conversation_id, payload["conversation_id"])
+
+    def test_get_conversation_messages_marks_discussion_active(self) -> None:
+        created = self.store.create_note(DEFAULT_USER_ID)
+        discussion = self.store.create_conversation_for_note(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+        )
+        self.store.mark_conversation_opened(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+            created.default_conversation.conversation_id,
+        )
+
+        response = self.request(
+            "GET",
+            (
+                f"/api/v1/notes/{created.note.note_id}/conversations/"
+                f"{discussion.conversation_id}/messages"
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        loaded = self.store.get_note(DEFAULT_USER_ID, created.note.note_id)
+        self.assertEqual(loaded.active_conversation_id, discussion.conversation_id)
 
     def test_list_notes_returns_display_and_pin_fields(self) -> None:
         created = self.store.create_note(DEFAULT_USER_ID)

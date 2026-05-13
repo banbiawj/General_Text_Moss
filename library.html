@@ -359,7 +359,7 @@
             const openNote = (note) => {
                 const params = new URLSearchParams({
                     note_id: note.note_id,
-                    conversation_id: note.default_conversation_id
+                    conversation_id: note.active_conversation_id || note.default_conversation_id
                 });
                 window.location.href = `/?${params.toString()}`;
             };

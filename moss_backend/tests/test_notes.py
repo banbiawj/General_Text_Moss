@@ -86,6 +86,14 @@ class NoteStoreTests(unittest.TestCase):
             loaded.default_conversation_id,
             created.default_conversation.conversation_id,
         )
+        self.assertEqual(
+            loaded.active_conversation_id,
+            created.default_conversation.conversation_id,
+        )
+        self.assertEqual(
+            loaded.last_opened_conversation_id,
+            created.default_conversation.conversation_id,
+        )
 
     def test_list_notes_returns_summaries_without_snapshot_ordered_by_updated_at(
         self,
@@ -112,6 +120,10 @@ class NoteStoreTests(unittest.TestCase):
         )
         self.assertEqual(notes[0].title, "Second title")
         self.assertEqual(notes[0].preview_text, "Second title beta")
+        self.assertEqual(
+            notes[0].active_conversation_id,
+            second.default_conversation.conversation_id,
+        )
         self.assertFalse(hasattr(notes[0], "canvas_snapshot"))
 
     def test_save_snapshot_updates_title_preview_and_timestamp(self) -> None:
@@ -186,6 +198,63 @@ class NoteStoreTests(unittest.TestCase):
                 first.note.note_id,
                 second.default_conversation.conversation_id,
             )
+
+    def test_create_conversation_for_note_adds_non_default_discussion(self) -> None:
+        store = NoteStore(self.make_temp_dir() / "metadata.sqlite3")
+        created = store.create_note(DEFAULT_USER_ID)
+
+        discussion = store.create_conversation_for_note(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+        )
+
+        self.assertEqual(discussion.note_id, created.note.note_id)
+        self.assertFalse(discussion.is_default)
+        conversations = store.list_note_conversations(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+        )
+        self.assertEqual(len(conversations), 2)
+        self.assertEqual(conversations[0].conversation_id, created.default_conversation.conversation_id)
+        loaded = store.get_note(DEFAULT_USER_ID, created.note.note_id)
+        self.assertEqual(loaded.active_conversation_id, discussion.conversation_id)
+        self.assertEqual(loaded.last_opened_conversation_id, discussion.conversation_id)
+
+    def test_mark_conversation_opened_does_not_touch_note_updated_at(self) -> None:
+        store = NoteStore(self.make_temp_dir() / "metadata.sqlite3")
+        created = store.create_note(DEFAULT_USER_ID)
+        discussion = store.create_conversation_for_note(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+        )
+        saved = store.save_snapshot(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+            "<h1>Stable note</h1>",
+        )
+
+        opened = store.mark_conversation_opened(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+            created.default_conversation.conversation_id,
+        )
+
+        self.assertEqual(opened.conversation_id, created.default_conversation.conversation_id)
+        loaded = store.get_note(DEFAULT_USER_ID, created.note.note_id)
+        self.assertEqual(loaded.active_conversation_id, created.default_conversation.conversation_id)
+        self.assertEqual(loaded.updated_at, saved.updated_at)
+        self.assertNotEqual(discussion.conversation_id, loaded.active_conversation_id)
+
+    def test_touch_conversation_sets_title_from_first_user_message(self) -> None:
+        store = NoteStore(self.make_temp_dir() / "metadata.sqlite3")
+        created = store.create_note(DEFAULT_USER_ID)
+
+        touched = store.touch_conversation(
+            created.default_conversation.conversation_id,
+            title_hint="  Help me improve the opening paragraph  ",
+        )
+
+        self.assertEqual(touched.title, "Help me improve the opening paragraph")
 
     def test_legacy_conversations_are_migrated_to_notes(self) -> None:
         db_path = self.make_temp_dir() / "metadata.sqlite3"
@@ -411,6 +480,7 @@ class NoteStoreTests(unittest.TestCase):
         self.assertIn("display_title", columns)
         self.assertIn("deleted_at", columns)
         self.assertIn("pinned_at", columns)
+        self.assertIn("last_opened_conversation_id", columns)
 
     def test_update_note_display_title_does_not_modify_snapshot_or_updated_at(
         self,

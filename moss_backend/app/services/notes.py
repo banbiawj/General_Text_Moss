@@ -13,7 +13,9 @@ from app.services.conversations import (
     DEFAULT_CONVERSATION_TITLE,
     DEFAULT_USER_ID,
     ConversationRecord,
+    InvalidConversationId,
     generate_conversation_id,
+    is_valid_conversation_id,
     utc_now_iso,
 )
 
@@ -21,7 +23,9 @@ from app.services.conversations import (
 NOTE_ID_PATTERN = re.compile(r"^note-[A-Za-z0-9_-]{8,64}$")
 DEFAULT_NOTE_TITLE = "Untitled note"
 DEFAULT_THREAD_TITLE = "Default conversation"
+DEFAULT_NEW_CONVERSATION_TITLE = "New discussion"
 _UNSET = object()
+CONVERSATION_TITLE_HINT_LIMIT = 80
 
 
 class InvalidNoteId(ValueError):
@@ -47,6 +51,7 @@ class NoteRecord:
     updated_at: str
     pinned_at: str | None
     deleted_at: str | None
+    last_opened_conversation_id: str | None
 
 
 @dataclass(frozen=True)
@@ -54,6 +59,7 @@ class NoteSummary:
     note_id: str
     user_id: str
     default_conversation_id: str
+    active_conversation_id: str
     title: str
     display_title: str | None
     effective_title: str
@@ -76,6 +82,8 @@ class LoadedNote:
     updated_at: str
     pinned_at: str | None
     default_conversation_id: str
+    active_conversation_id: str
+    last_opened_conversation_id: str | None
 
 
 @dataclass(frozen=True)
@@ -139,6 +147,24 @@ def effective_note_title(display_title: str | None, title: str) -> str:
     return normalize_display_title(display_title) or title or DEFAULT_NOTE_TITLE
 
 
+def normalize_conversation_title_hint(title_hint: str | None) -> str | None:
+    if title_hint is None:
+        return None
+    normalized = normalize_text(title_hint)
+    if not normalized:
+        return None
+    return normalized[:CONVERSATION_TITLE_HINT_LIMIT]
+
+
+def should_replace_conversation_title(title: str) -> bool:
+    return title in {
+        "",
+        DEFAULT_CONVERSATION_TITLE,
+        DEFAULT_THREAD_TITLE,
+        DEFAULT_NEW_CONVERSATION_TITLE,
+    }
+
+
 def extract_note_metadata(canvas_snapshot: str) -> NoteMetadata:
     parser = _NoteHtmlParser()
     parser.feed(canvas_snapshot)
@@ -170,9 +196,10 @@ class NoteStore:
                 """
                 INSERT INTO notes (
                     note_id, user_id, title, display_title, preview_text,
-                    canvas_snapshot, created_at, updated_at, pinned_at, deleted_at
+                    canvas_snapshot, created_at, updated_at, pinned_at, deleted_at,
+                    last_opened_conversation_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     note_id,
@@ -185,6 +212,7 @@ class NoteStore:
                     now,
                     None,
                     None,
+                    conversation_id,
                 ),
             )
             conn.execute(
@@ -220,6 +248,8 @@ class NoteStore:
                     n.note_id,
                     n.user_id,
                     c.conversation_id AS default_conversation_id,
+                    COALESCE(opened.conversation_id, c.conversation_id)
+                        AS active_conversation_id,
                     n.title,
                     n.display_title,
                     n.preview_text,
@@ -229,6 +259,10 @@ class NoteStore:
                 FROM notes n
                 JOIN conversations c
                     ON c.note_id = n.note_id AND c.is_default = 1
+                LEFT JOIN conversations opened
+                    ON opened.conversation_id = n.last_opened_conversation_id
+                    AND opened.note_id = n.note_id
+                    AND opened.user_id = n.user_id
                 WHERE n.user_id = ? AND n.deleted_at IS NULL
                 ORDER BY
                     n.pinned_at IS NULL ASC,
@@ -248,6 +282,7 @@ class NoteStore:
                     note_id=str(row["note_id"]),
                     user_id=str(row["user_id"]),
                     default_conversation_id=str(row["default_conversation_id"]),
+                    active_conversation_id=str(row["active_conversation_id"]),
                     title=title,
                     display_title=display_title,
                     effective_title=effective_note_title(display_title, title),
@@ -269,6 +304,10 @@ class NoteStore:
         default_conversation = self._get_default_conversation(note_id)
         if default_conversation is None:
             raise KeyError(f"default conversation not found for note: {note_id}")
+        active_conversation_id = self._active_conversation_id(
+            note,
+            default_conversation.conversation_id,
+        )
         return LoadedNote(
             note_id=note.note_id,
             user_id=note.user_id,
@@ -281,6 +320,8 @@ class NoteStore:
             updated_at=note.updated_at,
             pinned_at=note.pinned_at,
             default_conversation_id=default_conversation.conversation_id,
+            active_conversation_id=active_conversation_id,
+            last_opened_conversation_id=note.last_opened_conversation_id,
         )
 
     def save_snapshot(
@@ -403,6 +444,10 @@ class NoteStore:
         return DeletedNote(note_id=note_id, deleted_at=str(deleted_at))
 
     def get_conversation(self, conversation_id: str) -> ConversationRecord | None:
+        if not is_valid_conversation_id(conversation_id):
+            raise InvalidConversationId(
+                "conversation_id must match conv-[A-Za-z0-9_-]{8,64}"
+            )
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -432,12 +477,117 @@ class NoteStore:
             raise ValueError("conversation does not belong to note")
         return conversation
 
-    def touch_conversation(self, conversation_id: str) -> ConversationRecord:
+    def list_note_conversations(
+        self,
+        user_id: str,
+        note_id: str,
+    ) -> list[ConversationRecord]:
+        self._validate_note_id(note_id)
+        if self._get_note_record(user_id, note_id) is None:
+            raise KeyError(f"note not found: {note_id}")
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM conversations
+                WHERE user_id = ? AND note_id = ?
+                ORDER BY is_default DESC, updated_at DESC
+                """,
+                (user_id, note_id),
+            ).fetchall()
+        return [self._conversation_from_row(row) for row in rows]
+
+    def create_conversation_for_note(
+        self,
+        user_id: str,
+        note_id: str,
+    ) -> ConversationRecord:
+        self._validate_note_id(note_id)
+        if self._get_note_record(user_id, note_id) is None:
+            raise KeyError(f"note not found: {note_id}")
+
+        conversation_id = self._new_unique_conversation_id()
         now = utc_now_iso()
         with self._connect() as conn:
             conn.execute(
-                "UPDATE conversations SET updated_at = ? WHERE conversation_id = ?",
-                (now, conversation_id),
+                """
+                INSERT INTO conversations (
+                    conversation_id, user_id, title, created_at, updated_at,
+                    note_id, is_default
+                )
+                VALUES (?, ?, ?, ?, ?, ?, 0)
+                """,
+                (
+                    conversation_id,
+                    user_id,
+                    DEFAULT_NEW_CONVERSATION_TITLE,
+                    now,
+                    now,
+                    note_id,
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE notes
+                SET last_opened_conversation_id = ?
+                WHERE user_id = ? AND note_id = ? AND deleted_at IS NULL
+                """,
+                (conversation_id, user_id, note_id),
+            )
+            conn.commit()
+
+        conversation = self.get_conversation(conversation_id)
+        if conversation is None:
+            raise RuntimeError("failed to create conversation")
+        return conversation
+
+    def mark_conversation_opened(
+        self,
+        user_id: str,
+        note_id: str,
+        conversation_id: str,
+    ) -> ConversationRecord:
+        conversation = self.verify_conversation_for_note(
+            user_id,
+            note_id,
+            conversation_id,
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE notes
+                SET last_opened_conversation_id = ?
+                WHERE user_id = ? AND note_id = ? AND deleted_at IS NULL
+                """,
+                (conversation_id, user_id, note_id),
+            )
+            conn.commit()
+        return conversation
+
+    def touch_conversation(
+        self,
+        conversation_id: str,
+        *,
+        title_hint: str | None = None,
+    ) -> ConversationRecord:
+        current = self.get_conversation(conversation_id)
+        if current is None:
+            raise KeyError(f"conversation not found: {conversation_id}")
+
+        now = utc_now_iso()
+        next_title = current.title
+        hinted_title = normalize_conversation_title_hint(title_hint)
+        if hinted_title and should_replace_conversation_title(current.title):
+            next_title = hinted_title
+
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE conversations
+                SET updated_at = ?, title = ?
+                WHERE conversation_id = ?
+                """,
+                (now, next_title, conversation_id),
             )
             conn.commit()
         conversation = self.get_conversation(conversation_id)
@@ -456,6 +606,7 @@ class NoteStore:
                     display_title TEXT,
                     pinned_at TEXT,
                     deleted_at TEXT,
+                    last_opened_conversation_id TEXT,
                     preview_text TEXT NOT NULL,
                     canvas_snapshot TEXT NOT NULL,
                     created_at TEXT NOT NULL,
@@ -515,6 +666,10 @@ class NoteStore:
             conn.execute("ALTER TABLE notes ADD COLUMN deleted_at TEXT")
         if "pinned_at" not in columns:
             conn.execute("ALTER TABLE notes ADD COLUMN pinned_at TEXT")
+        if "last_opened_conversation_id" not in columns:
+            conn.execute(
+                "ALTER TABLE notes ADD COLUMN last_opened_conversation_id TEXT"
+            )
 
     def _migrate_legacy_conversations(self, conn: sqlite3.Connection) -> None:
         rows = conn.execute(
@@ -533,9 +688,10 @@ class NoteStore:
                 """
                 INSERT INTO notes (
                     note_id, user_id, title, display_title, preview_text,
-                    canvas_snapshot, created_at, updated_at, pinned_at, deleted_at
+                    canvas_snapshot, created_at, updated_at, pinned_at, deleted_at,
+                    last_opened_conversation_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     note_id,
@@ -548,6 +704,7 @@ class NoteStore:
                     str(row["updated_at"]),
                     None,
                     None,
+                    str(row["conversation_id"]),
                 ),
             )
             conn.execute(
@@ -635,6 +792,24 @@ class NoteStore:
                 snapshots[str(row["thread_id"])] = snapshot
         return snapshots
 
+    def _active_conversation_id(
+        self,
+        note: NoteRecord,
+        default_conversation_id: str,
+    ) -> str:
+        if (
+            note.last_opened_conversation_id
+            and is_valid_conversation_id(note.last_opened_conversation_id)
+        ):
+            conversation = self.get_conversation(note.last_opened_conversation_id)
+            if (
+                conversation is not None
+                and conversation.user_id == note.user_id
+                and conversation.note_id == note.note_id
+            ):
+                return conversation.conversation_id
+        return default_conversation_id
+
     def _get_note_record(self, user_id: str, note_id: str) -> NoteRecord | None:
         with self._connect() as conn:
             row = conn.execute(
@@ -710,6 +885,9 @@ class NoteStore:
             updated_at=str(row["updated_at"]),
             pinned_at=None if row["pinned_at"] is None else str(row["pinned_at"]),
             deleted_at=None if row["deleted_at"] is None else str(row["deleted_at"]),
+            last_opened_conversation_id=None
+            if row["last_opened_conversation_id"] is None
+            else str(row["last_opened_conversation_id"]),
         )
 
     def _conversation_from_row(self, row: sqlite3.Row) -> ConversationRecord:

@@ -13,6 +13,7 @@ from app.agent.graph import stream_agent_events
 from app.agent.graph import get_conversation_messages
 from app.api.schemas import (
     ChatRequest,
+    CreateNoteConversationResponse,
     ConversationMessagesResponse,
     CreateNoteResponse,
     DeleteNoteResponse,
@@ -20,6 +21,8 @@ from app.api.schemas import (
     ExportDocumentRequest,
     HealthResponse,
     NoteDetailResponse,
+    NoteConversationResponse,
+    NoteConversationsResponse,
     NoteListResponse,
     NoteSummaryResponse,
     SaveDocumentRequest,
@@ -43,6 +46,19 @@ from app.tools.document_tools import DOWNLOAD_CACHE
 
 api_router = APIRouter(prefix="/api/v1", tags=["api-v1"])
 document_router = APIRouter(prefix="/api/document", tags=["document"])
+
+
+def _note_conversation_response(conversation) -> NoteConversationResponse:
+    if conversation.note_id is None:
+        raise ValueError("conversation is not attached to a note")
+    return NoteConversationResponse(
+        conversation_id=conversation.conversation_id,
+        note_id=conversation.note_id,
+        title=conversation.title,
+        is_default=conversation.is_default,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+    )
 
 
 def get_conversation_store() -> ConversationStore:
@@ -71,6 +87,7 @@ async def list_notes() -> NoteListResponse:
             NoteSummaryResponse(
                 note_id=note.note_id,
                 default_conversation_id=note.default_conversation_id,
+                active_conversation_id=note.active_conversation_id,
                 title=note.title,
                 display_title=note.display_title,
                 effective_title=note.effective_title,
@@ -104,6 +121,8 @@ async def get_note(note_id: str) -> NoteDetailResponse:
     return NoteDetailResponse(
         note_id=note.note_id,
         default_conversation_id=note.default_conversation_id,
+        active_conversation_id=note.active_conversation_id,
+        last_opened_conversation_id=note.last_opened_conversation_id,
         title=note.title,
         display_title=note.display_title,
         effective_title=note.effective_title,
@@ -186,6 +205,46 @@ async def delete_note(note_id: str) -> DeleteNoteResponse:
 
 
 @api_router.get(
+    "/notes/{note_id}/conversations",
+    response_model=NoteConversationsResponse,
+)
+async def list_note_conversations(note_id: str) -> NoteConversationsResponse:
+    try:
+        store = get_note_store()
+        note = store.get_note(DEFAULT_USER_ID, note_id)
+        conversations = store.list_note_conversations(DEFAULT_USER_ID, note_id)
+    except InvalidNoteId as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return NoteConversationsResponse(
+        conversations=[
+            _note_conversation_response(conversation)
+            for conversation in conversations
+        ],
+        active_conversation_id=note.active_conversation_id,
+    )
+
+
+@api_router.post(
+    "/notes/{note_id}/conversations",
+    response_model=CreateNoteConversationResponse,
+)
+async def create_note_conversation(note_id: str) -> CreateNoteConversationResponse:
+    try:
+        conversation = get_note_store().create_conversation_for_note(
+            DEFAULT_USER_ID,
+            note_id,
+        )
+    except InvalidNoteId as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    response = _note_conversation_response(conversation)
+    return CreateNoteConversationResponse(**response.model_dump())
+
+
+@api_router.get(
     "/notes/{note_id}/conversations/{conversation_id}/messages",
     response_model=ConversationMessagesResponse,
 )
@@ -195,7 +254,7 @@ async def list_conversation_messages(
     request: Request,
 ) -> ConversationMessagesResponse:
     try:
-        conversation = get_note_store().verify_conversation_for_note(
+        conversation = get_note_store().mark_conversation_opened(
             DEFAULT_USER_ID,
             note_id,
             conversation_id,
@@ -234,6 +293,15 @@ async def chat_stream(payload: ChatRequest, request: Request) -> StreamingRespon
                 DEFAULT_USER_ID,
                 payload.note_id,
                 payload.canvas_snapshot,
+            )
+            note_store.mark_conversation_opened(
+                DEFAULT_USER_ID,
+                payload.note_id,
+                payload.conversation_id,
+            )
+            conversation = note_store.touch_conversation(
+                conversation.conversation_id,
+                title_hint=payload.user_input,
             )
             resolved_conversation_id = conversation.conversation_id
             resolved_user_id = conversation.user_id

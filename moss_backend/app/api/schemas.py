@@ -57,6 +57,7 @@ class ChatRequest(BaseModel):
 class NoteSummaryResponse(BaseModel):
     note_id: str
     default_conversation_id: str
+    active_conversation_id: str
     title: str
     display_title: str | None = None
     effective_title: str
@@ -78,6 +79,8 @@ class CreateNoteResponse(BaseModel):
 class NoteDetailResponse(BaseModel):
     note_id: str
     default_conversation_id: str
+    active_conversation_id: str
+    last_opened_conversation_id: str | None = None
     title: str
     display_title: str | None = None
     effective_title: str
@@ -117,6 +120,29 @@ class UpdateNoteResponse(BaseModel):
 class DeleteNoteResponse(BaseModel):
     note_id: str
     deleted_at: str
+
+
+class NoteConversationResponse(BaseModel):
+    conversation_id: str
+    note_id: str
+    title: str
+    is_default: bool
+    created_at: str
+    updated_at: str
+
+
+class NoteConversationsResponse(BaseModel):
+    conversations: list[NoteConversationResponse]
+    active_conversation_id: str
+
+
+class CreateNoteConversationResponse(BaseModel):
+    conversation_id: str
+    note_id: str
+    title: str
+    is_default: bool
+    created_at: str
+    updated_at: str
 
 
 class ConversationMessageResponse(BaseModel):

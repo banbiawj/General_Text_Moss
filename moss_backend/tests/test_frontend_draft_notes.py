@@ -70,6 +70,63 @@ class FrontendDraftNoteTests(unittest.TestCase):
         self.assertIn("return `${diffHours}小时前`;", library_html)
         self.assertIn("return '昨天';", library_html)
 
+    def test_frontend_contains_note_discussion_switching_hooks(self) -> None:
+        index_html = (self.repo_root() / "index.html").read_text(encoding="utf-8")
+        library_html = (self.repo_root() / "library.html").read_text(encoding="utf-8")
+
+        self.assertIn("const noteConversations = ref([]);", index_html)
+        self.assertIn("const loadNoteConversations = async () =>", index_html)
+        self.assertIn("const createConversation = async () =>", index_html)
+        self.assertIn("const switchConversation = async (conversation) =>", index_html)
+        self.assertIn("const showConversationTree = ref(false);", index_html)
+        self.assertIn("const conversationTreeStyle = ref(", index_html)
+        self.assertIn("const updateConversationTreePosition = () =>", index_html)
+        self.assertIn("const toggleConversationTree = async () =>", index_html)
+        self.assertIn('ref="conversationTreePanelRef"', index_html)
+        self.assertIn(
+            "note.active_conversation_id || note.default_conversation_id",
+            library_html,
+        )
+
+    def test_discussion_menu_uses_modern_rows_instead_of_ascii_tree(self) -> None:
+        index_html = (self.repo_root() / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("fa-regular fa-message text-[11px] shrink-0", index_html)
+        self.assertIn("{{ conversationTitle(conversation) }}", index_html)
+        self.assertIn('v-if="isCurrentConversation(conversation)"', index_html)
+        self.assertIn('class="rounded-full bg-black shrink-0"', index_html)
+        self.assertIn('style="width: 0.375rem; height: 0.375rem;"', index_html)
+        self.assertIn("group w-full flex items-center justify-between px-2 py-1.5 text-sm", index_html)
+        self.assertNotIn("const conversationTreeLine = (conversation, index) =>", index_html)
+        self.assertNotIn("const conversationTreePrefix = (index) =>", index_html)
+        self.assertNotIn("const conversationActiveMarker = (conversation = {}) =>", index_html)
+        self.assertNotIn("{{ conversationTreeLine(conversation, index) }}", index_html)
+        self.assertNotIn("grid-cols-[", index_html)
+
+    def test_discussion_menu_has_floating_panel_treatment_and_animation(self) -> None:
+        index_html = (self.repo_root() / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("@keyframes popIn", index_html)
+        self.assertIn(".animate-pop-in", index_html)
+        self.assertIn("bg-white/80 backdrop-blur-xl border border-gray-100 rounded-xl", index_html)
+        self.assertIn("class=\"fixed bg-white/80 backdrop-blur-xl border border-gray-100 rounded-xl text-gray-800 flex flex-col gap-1 overflow-hidden animate-pop-in\"", index_html)
+        self.assertIn("box-shadow: 0 8px 30px rgb(0 0 0 / 0.08); padding: 0.375rem;", index_html)
+        self.assertIn("border-b border-gray-100 mb-1", index_html)
+        self.assertIn("rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-800", index_html)
+        self.assertNotIn("font-mono", index_html)
+
+    def test_discussion_tree_positions_between_left_edge_and_editor(self) -> None:
+        index_html = (self.repo_root() / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn('ref="libraryButtonRef"', index_html)
+        self.assertIn("const libraryButtonRef = ref(null);", index_html)
+        self.assertIn("const preferredTreeWidth = 236;", index_html)
+        self.assertIn("const leftSpace = panelRect ? panelRect.left : window.innerWidth;", index_html)
+        self.assertIn("const centeredLeft = (leftSpace - treeWidth) / 2;", index_html)
+        self.assertIn("const buttonRect = libraryButtonRef.value?.getBoundingClientRect?.();", index_html)
+        self.assertIn("const top = buttonRect ? buttonRect.bottom + 14 : fallbackTop;", index_html)
+        self.assertNotIn("top: '40%'", index_html)
+
 
 if __name__ == "__main__":
     unittest.main()

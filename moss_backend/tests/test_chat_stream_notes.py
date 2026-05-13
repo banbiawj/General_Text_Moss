@@ -111,9 +111,34 @@ class ChatStreamNotesTests(unittest.TestCase):
         self.assertEqual(loaded.title, "Chat title")
         self.assertEqual(loaded.preview_text, "Chat title Chat body")
         self.assertEqual(
+            loaded.active_conversation_id,
+            created.default_conversation.conversation_id,
+        )
+        self.assertEqual(
             loaded.canvas_snapshot,
             "<h1>Chat title</h1><p>Chat body</p>",
         )
+
+    def test_matching_note_chat_touches_conversation_title(self) -> None:
+        created = self.store.create_note(DEFAULT_USER_ID)
+
+        response = self.post_chat(
+            {
+                "session_id": "session-title",
+                "note_id": created.note.note_id,
+                "conversation_id": created.default_conversation.conversation_id,
+                "user_input": "Improve the opening",
+                "canvas_snapshot": "<p>doc</p>",
+            }
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        conversation = self.store.get_conversation(
+            created.default_conversation.conversation_id
+        )
+        self.assertIsNotNone(conversation)
+        assert conversation is not None
+        self.assertEqual(conversation.title, "Improve the opening")
 
     def test_mismatched_conversation_returns_409(self) -> None:
         first = self.store.create_note(DEFAULT_USER_ID)

@@ -1,0 +1,78 @@
+.app-loading {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 1.5rem;
+    padding-top: 42vh;
+    background:
+        radial-gradient(circle at 50% 42%, rgba(255, 255, 255, .94), rgba(250, 250, 250, .9) 38%, #f7f7f7 100%);
+    color: #171717;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    transition: opacity .26s ease, visibility .26s ease;
+}
+
+.app-loading-hidden {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.app-loading-stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: .75rem;
+    text-align: center;
+    animation: loading-stage-in .24s ease-out both;
+}
+
+.app-loading-mark {
+    color: #171717;
+    font-size: clamp(3.25rem, 8vw, 4.5rem);
+    font-weight: 600;
+    line-height: .8;
+    letter-spacing: 0;
+    animation: loading-pulse 1.8s ease-in-out infinite;
+}
+
+.app-loading-text {
+    color: #737373;
+    font-size: .8125rem;
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: .04em;
+}
+
+@keyframes loading-stage-in {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes loading-pulse {
+    0%, 100% {
+        opacity: .76;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.04);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-loading,
+    .app-loading-stage,
+    .app-loading-mark {
+        transition: none;
+        animation: none;
+    }
+}

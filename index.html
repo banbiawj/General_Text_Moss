@@ -76,12 +76,18 @@
     </div>
 
     <div ref="panelRef"
-         class="fixed left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 flex flex-col overflow-visible"
+         class="fixed left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 flex flex-col overflow-visible origin-top"
          :class="[
-            isFullScreen ? 'top-0 w-full max-w-none h-full rounded-none z-[100]' : 'top-6 w-[95%] max-w-4xl rounded-2xl z-40',
+            isFullScreen ? 'rounded-none z-[100]' : 'rounded-2xl z-40',
             isDragging ? 'transition-none' : 'transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]'
          ]"
-         :style="isFullScreen ? {} : { height: panelHeight + 'px' }">
+         style="will-change: width, height, top, max-width;"
+         :style="{
+            height: isFullScreen ? '100vh' : panelHeight + 'px',
+            width: isFullScreen ? '100vw' : '95%',
+            maxWidth: isFullScreen ? '100vw' : '56rem',
+            top: isFullScreen ? '0px' : '1.5rem'
+         }">
 
         <div class="bg-white/50 px-4 md:px-6 py-4 flex justify-between items-center shrink-0 border-b border-gray-100 transition-all duration-300"
              :class="isFullScreen ? 'rounded-none' : 'rounded-t-2xl'">
@@ -147,13 +153,14 @@
              @mousedown="startDragging"></div>
     </div>
 
-    <div class="relative w-full max-w-4xl mx-auto h-screen overflow-y-auto pb-32 px-4 md:px-0 scroll-smooth no-scrollbar"
+    <div class="relative w-full max-w-4xl mx-auto h-screen overflow-y-auto pb-32 px-4 md:px-0 scroll-smooth no-scrollbar origin-top"
          id="chat-container"
          :class="[
             isFullScreen ? 'opacity-0 pointer-events-none z-0 scale-95 blur-sm' : 'opacity-100 z-10 scale-100 blur-0',
             isDragging ? 'transition-none' : 'transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]'
          ]"
-         :style="isFullScreen ? {} : { paddingTop: (chatPaddingTop + panelHeight) + 'px' }">
+         style="will-change: transform, opacity, filter;"
+         :style="{ paddingTop: (chatPaddingTop + panelHeight) + 'px' }">
 
         <div class="flex flex-col gap-6 w-full">
             <div v-for="(msg, index) in messages" :key="index"
@@ -183,8 +190,9 @@
         </div>
     </div>
 
-    <div class="fixed left-1/2 transform -translate-x-1/2 w-[95%] max-w-3xl transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]"
-         :class="isFullScreen ? 'bottom-[-100px] opacity-0 pointer-events-none z-0' : 'bottom-6 opacity-100 z-50'">
+    <div class="fixed left-1/2 w-[95%] max-w-3xl z-50 transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]"
+         style="bottom: 1.5rem; will-change: transform, opacity;"
+         :class="isFullScreen ? 'translate-y-[150px] -translate-x-1/2 opacity-0 pointer-events-none' : 'translate-y-0 -translate-x-1/2 opacity-100'">
         <div class="bg-white rounded-full shadow-[0_4px_20px_rgb(0,0,0,0.05)] border border-gray-200 p-2 pl-5 flex items-center gap-3 transition-all focus-within:border-gray-300">
             <input v-model="inputText"
                    @keyup.enter="sendMessage()"

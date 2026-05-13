@@ -29,6 +29,7 @@ from app.api.schemas import (
     SaveDocumentResponse,
     SaveNoteSnapshotRequest,
     SaveNoteSnapshotResponse,
+    UpdateNoteConversationRequest,
     UpdateNoteRequest,
     UpdateNoteResponse,
     UploadResponse,
@@ -242,6 +243,31 @@ async def create_note_conversation(note_id: str) -> CreateNoteConversationRespon
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     response = _note_conversation_response(conversation)
     return CreateNoteConversationResponse(**response.model_dump())
+
+
+@api_router.patch(
+    "/notes/{note_id}/conversations/{conversation_id}",
+    response_model=NoteConversationResponse,
+)
+async def update_note_conversation(
+    note_id: str,
+    conversation_id: str,
+    payload: UpdateNoteConversationRequest,
+) -> NoteConversationResponse:
+    try:
+        conversation = get_note_store().rename_conversation(
+            DEFAULT_USER_ID,
+            note_id,
+            conversation_id,
+            payload.title,
+        )
+    except (InvalidConversationId, InvalidNoteId, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return _note_conversation_response(conversation)
 
 
 @api_router.get(

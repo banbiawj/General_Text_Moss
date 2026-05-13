@@ -26,6 +26,7 @@ DEFAULT_THREAD_TITLE = "Default conversation"
 DEFAULT_NEW_CONVERSATION_TITLE = "New discussion"
 _UNSET = object()
 CONVERSATION_TITLE_HINT_LIMIT = 80
+CONVERSATION_TITLE_LIMIT = 80
 
 
 class InvalidNoteId(ValueError):
@@ -154,6 +155,13 @@ def normalize_conversation_title_hint(title_hint: str | None) -> str | None:
     if not normalized:
         return None
     return normalized[:CONVERSATION_TITLE_HINT_LIMIT]
+
+
+def normalize_conversation_title(title: str) -> str:
+    normalized = normalize_text(title)
+    if not normalized:
+        raise ValueError("conversation title cannot be empty")
+    return normalized[:CONVERSATION_TITLE_LIMIT]
 
 
 def should_replace_conversation_title(title: str) -> bool:
@@ -563,6 +571,36 @@ class NoteStore:
             )
             conn.commit()
         return conversation
+
+    def rename_conversation(
+        self,
+        user_id: str,
+        note_id: str,
+        conversation_id: str,
+        title: str,
+    ) -> ConversationRecord:
+        conversation = self.verify_conversation_for_note(
+            user_id,
+            note_id,
+            conversation_id,
+        )
+        next_title = normalize_conversation_title(title)
+        now = utc_now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE conversations
+                SET title = ?, updated_at = ?
+                WHERE conversation_id = ?
+                """,
+                (next_title, now, conversation.conversation_id),
+            )
+            conn.commit()
+
+        renamed = self.get_conversation(conversation.conversation_id)
+        if renamed is None:
+            raise KeyError(f"conversation not found: {conversation.conversation_id}")
+        return renamed
 
     def touch_conversation(
         self,

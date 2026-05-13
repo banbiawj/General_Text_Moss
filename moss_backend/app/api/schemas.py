@@ -145,6 +145,10 @@ class CreateNoteConversationResponse(BaseModel):
     updated_at: str
 
 
+class UpdateNoteConversationRequest(BaseModel):
+    title: str
+
+
 class ConversationMessageResponse(BaseModel):
     role: Literal["user", "ai"]
     content: str

@@ -220,6 +220,28 @@ class NoteStoreTests(unittest.TestCase):
         self.assertEqual(loaded.active_conversation_id, discussion.conversation_id)
         self.assertEqual(loaded.last_opened_conversation_id, discussion.conversation_id)
 
+    def test_rename_conversation_updates_attached_discussion_title(self) -> None:
+        store = NoteStore(self.make_temp_dir() / "metadata.sqlite3")
+        created = store.create_note(DEFAULT_USER_ID)
+        discussion = store.create_conversation_for_note(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+        )
+
+        renamed = store.rename_conversation(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+            discussion.conversation_id,
+            "  Polished structure  ",
+        )
+
+        self.assertEqual(renamed.title, "Polished structure")
+        conversations = store.list_note_conversations(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+        )
+        self.assertIn("Polished structure", [item.title for item in conversations])
+
     def test_mark_conversation_opened_does_not_touch_note_updated_at(self) -> None:
         store = NoteStore(self.make_temp_dir() / "metadata.sqlite3")
         created = store.create_note(DEFAULT_USER_ID)

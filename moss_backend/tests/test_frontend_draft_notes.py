@@ -78,7 +78,10 @@ class FrontendDraftNoteTests(unittest.TestCase):
         self.assertIn("const loadNoteConversations = async () =>", index_html)
         self.assertIn("const createConversation = async () =>", index_html)
         self.assertIn("const switchConversation = async (conversation) =>", index_html)
-        self.assertIn("const showConversationTree = ref(false);", index_html)
+        self.assertIn("const startRenameConversation = (conversation) =>", index_html)
+        self.assertIn("const saveConversationTitle = async (conversation) =>", index_html)
+        self.assertIn("const cancelRenameConversation = () =>", index_html)
+        self.assertIn("const showConversationTree = ref(true);", index_html)
         self.assertIn("const conversationTreeStyle = ref(", index_html)
         self.assertIn("const updateConversationTreePosition = () =>", index_html)
         self.assertIn("const toggleConversationTree = async () =>", index_html)
@@ -87,6 +90,41 @@ class FrontendDraftNoteTests(unittest.TestCase):
             "note.active_conversation_id || note.default_conversation_id",
             library_html,
         )
+
+    def test_discussion_menu_supports_inline_conversation_rename(self) -> None:
+        index_html = (self.repo_root() / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("const editingConversationId = ref('');", index_html)
+        self.assertIn("const renameConversationDraft = ref('');", index_html)
+        self.assertIn("@click.stop=\"startRenameConversation(conversation)\"", index_html)
+        self.assertIn("fa-regular fa-pen-to-square", index_html)
+        self.assertIn("v-if=\"editingConversationId === conversation.conversation_id\"", index_html)
+        self.assertIn("v-model=\"renameConversationDraft\"", index_html)
+        self.assertIn("@keydown.enter.prevent=\"saveConversationTitle(conversation)\"", index_html)
+        self.assertIn("@keydown.esc.prevent=\"cancelRenameConversation\"", index_html)
+        self.assertIn("@blur=\"saveConversationTitle(conversation)\"", index_html)
+        self.assertIn("@click.stop=\"saveConversationTitle(conversation)\"", index_html)
+        self.assertIn("@click.stop=\"cancelRenameConversation\"", index_html)
+        self.assertIn("method: 'PATCH'", index_html)
+        self.assertIn("body: JSON.stringify({ title })", index_html)
+
+    def test_discussion_menu_closes_from_panel_header_or_title_toggle(self) -> None:
+        index_html = (self.repo_root() / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("const showConversationTree = ref(true);", index_html)
+        self.assertIn("@click.stop=\"closeConversationTree\"", index_html)
+        self.assertIn("closeConversationTree,", index_html)
+        self.assertIn(":title=\"showConversationTree ? 'Close discussions' : 'Open discussions'\"", index_html)
+        self.assertIn(":class=\"showConversationTree ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down'\"", index_html)
+        self.assertIn('class="fa-solid fa-minus text-[10px]"', index_html)
+        self.assertNotIn('class="fa-solid fa-chevron-up text-[10px]"', index_html)
+        self.assertIn('title="收起讨论"', index_html)
+        self.assertIn("if (showConversationTree.value) {\n                    closeConversationTree();\n                    return;\n                }", index_html)
+        self.assertIn("showConversationTree.value = true;", index_html)
+        self.assertNotIn("const handleDocumentPointerDown = (event) =>", index_html)
+        self.assertNotIn("document.addEventListener('pointerdown', handleDocumentPointerDown);", index_html)
+        self.assertNotIn("document.removeEventListener('pointerdown', handleDocumentPointerDown);", index_html)
+        self.assertNotIn("await loadConversationMessages();\n                    await loadNoteConversations();\n                    closeConversationTree();", index_html)
 
     def test_discussion_menu_uses_modern_rows_instead_of_ascii_tree(self) -> None:
         index_html = (self.repo_root() / "index.html").read_text(encoding="utf-8")

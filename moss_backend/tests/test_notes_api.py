@@ -212,6 +212,32 @@ class NotesApiTests(unittest.TestCase):
         loaded = self.store.get_note(DEFAULT_USER_ID, created.note.note_id)
         self.assertEqual(loaded.active_conversation_id, payload["conversation_id"])
 
+    def test_patch_note_conversation_renames_discussion(self) -> None:
+        created = self.store.create_note(DEFAULT_USER_ID)
+        discussion = self.store.create_conversation_for_note(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+        )
+
+        response = self.request(
+            "PATCH",
+            (
+                f"/api/v1/notes/{created.note.note_id}/conversations/"
+                f"{discussion.conversation_id}"
+            ),
+            json={"title": "  Structure rewrite  "},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["conversation_id"], discussion.conversation_id)
+        self.assertEqual(payload["title"], "Structure rewrite")
+        conversations = self.store.list_note_conversations(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+        )
+        self.assertIn("Structure rewrite", [item.title for item in conversations])
+
     def test_get_conversation_messages_marks_discussion_active(self) -> None:
         created = self.store.create_note(DEFAULT_USER_ID)
         discussion = self.store.create_conversation_for_note(

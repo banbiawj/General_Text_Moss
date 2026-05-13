@@ -14,7 +14,9 @@
       "imports": {
         "vue": "https://unpkg.com/vue@3/dist/vue.esm-browser.js",
         "@tiptap/core": "https://esm.sh/@tiptap/core@2.2.4",
-        "@tiptap/starter-kit": "https://esm.sh/@tiptap/starter-kit@2.2.4"
+        "@tiptap/starter-kit": "https://esm.sh/@tiptap/starter-kit@2.2.4",
+        "marked": "https://esm.sh/marked@12.0.2",
+        "dompurify": "https://esm.sh/dompurify@3.0.8"
       }
     }
     </script>
@@ -40,6 +42,28 @@
         .document-content strong { color: #171717; font-weight: 600; }
         .document-content code { background-color: #f5f5f5; padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-size: 0.85em; font-family: monospace; }
         .ProseMirror:focus { outline: none; }
+
+        .chat-markdown { white-space: normal; overflow-x: auto; }
+        .chat-markdown :where(p) { margin: 0 0 0.75rem; }
+        .chat-markdown :where(p:last-child) { margin-bottom: 0; }
+        .chat-markdown :where(strong) { color: #171717; font-weight: 600; }
+        .chat-markdown :where(a) { color: #262626; text-decoration: underline; text-underline-offset: 2px; }
+        .chat-markdown :where(ul, ol) { margin: 0.5rem 0 0.75rem; padding-left: 1.25rem; }
+        .chat-markdown :where(ul) { list-style: disc; }
+        .chat-markdown :where(ol) { list-style: decimal; }
+        .chat-markdown :where(li) { margin: 0.25rem 0; }
+        .chat-markdown :where(h1, h2, h3, h4) { color: #171717; font-weight: 600; line-height: 1.35; margin: 0.85rem 0 0.45rem; letter-spacing: 0; }
+        .chat-markdown :where(h1) { font-size: 1.15rem; }
+        .chat-markdown :where(h2) { font-size: 1.05rem; }
+        .chat-markdown :where(h3, h4) { font-size: 1rem; }
+        .chat-markdown :where(code) { background: #f5f5f5; border-radius: 0.25rem; color: #262626; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.86em; padding: 0.15rem 0.3rem; }
+        .chat-markdown :where(pre) { background: #f7f7f7; border: 1px solid #e5e5e5; border-radius: 0.5rem; margin: 0.75rem 0; overflow-x: auto; padding: 0.85rem; }
+        .chat-markdown :where(pre code) { background: transparent; border-radius: 0; display: block; padding: 0; white-space: pre; }
+        .chat-markdown :where(blockquote) { border-left: 3px solid #d4d4d4; color: #525252; margin: 0.75rem 0; padding-left: 0.75rem; }
+        .chat-markdown :where(table) { border-collapse: collapse; margin: 0.75rem 0; min-width: 24rem; width: 100%; }
+        .chat-markdown :where(th, td) { border: 1px solid #e5e5e5; padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; }
+        .chat-markdown :where(th) { background: #f7f7f7; color: #262626; font-weight: 600; }
+        .chat-markdown :where(hr) { border: 0; border-top: 1px solid #e5e5e5; margin: 0.9rem 0; }
 
         .cursor-blink::after { content: '|'; animation: blink 1s step-start infinite; color: #171717; font-weight: 300; }
         @keyframes blink { 50% { opacity: 0; } }
@@ -181,9 +205,19 @@
                     <i v-else class="fa-solid fa-asterisk text-gray-600 text-xs"></i>
                 </div>
 
-                <div class="p-4 rounded-2xl text-[15px] leading-relaxed whitespace-pre-wrap"
-                     :class="msg.role === 'user' ? 'bg-black text-white rounded-tr-sm shadow-sm' : 'bg-white border border-gray-100 text-gray-800 rounded-tl-sm shadow-sm'">
-                    {{ msg.content }}
+                <div class="flex flex-col"
+                     :class="msg.role === 'user' ? 'items-end' : 'items-start'">
+                    <div class="p-4 rounded-2xl text-[15px] leading-relaxed"
+                         :class="msg.role === 'user' ? 'bg-black text-white rounded-tr-sm shadow-sm whitespace-pre-wrap' : 'bg-white border border-gray-100 text-gray-800 rounded-tl-sm shadow-sm'">
+                        <div v-if="msg.role === 'ai'" class="chat-markdown" v-html="renderMarkdown(msg.content)"></div>
+                        <template v-else>{{ msg.content }}</template>
+                    </div>
+                    <button @click.stop="copyMessage(msg.content, index)"
+                            class="mt-1 h-8 w-8 rounded-md text-gray-400 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-gray-700 hover:bg-white/70 transition-all flex items-center justify-center text-sm"
+                            :class="msg.role === 'user' ? 'self-start' : 'self-end'"
+                            title="Copy message">
+                        <i :class="copiedMessageIndex === index ? 'fa-solid fa-check text-green-500' : 'fa-regular fa-copy'"></i>
+                    </button>
                 </div>
             </div>
 
@@ -223,6 +257,13 @@
     import { createApp, ref, nextTick, onMounted, onUnmounted } from 'vue';
     import { Editor, Node, mergeAttributes, Extension } from '@tiptap/core';
     import StarterKit from '@tiptap/starter-kit';
+    import { marked } from 'marked';
+    import DOMPurify from 'dompurify';
+
+    marked.setOptions({
+        breaks: true,
+        gfm: true
+    });
 
     const loadingStartedAt = performance.now();
     const minimumLoadingMs = 320;
@@ -354,6 +395,39 @@
                 }
             ];
             const messages = ref(defaultMessages());
+            const copiedMessageIndex = ref(null);
+
+            const renderMarkdown = (content = '') => {
+                const html = marked.parse(content || '');
+                return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+            };
+
+            const copyMessage = async (content = '', index = null) => {
+                const text = content || '';
+                try {
+                    if (navigator.clipboard?.writeText && window.isSecureContext) {
+                        await navigator.clipboard.writeText(text);
+                    } else {
+                        const textarea = document.createElement('textarea');
+                        textarea.value = text;
+                        textarea.setAttribute('readonly', '');
+                        textarea.style.position = 'fixed';
+                        textarea.style.top = '-9999px';
+                        textarea.style.opacity = '0';
+                        document.body.appendChild(textarea);
+                        textarea.select();
+                        const copied = document.execCommand('copy');
+                        document.body.removeChild(textarea);
+                        if (!copied) throw new Error('copy failed');
+                    }
+                    copiedMessageIndex.value = index;
+                    window.setTimeout(() => {
+                        if (copiedMessageIndex.value === index) copiedMessageIndex.value = null;
+                    }, 1200);
+                } catch (error) {
+                    copiedMessageIndex.value = null;
+                }
+            };
 
             const initialContent = `
                 <h1>欢迎使用 moss</h1>
@@ -1308,7 +1382,10 @@
                 setCurrentConversationId,
                 saveStatus,
                 noteLoadError,
-                openLibrary
+                openLibrary,
+                renderMarkdown,
+                copyMessage,
+                copiedMessageIndex
             };
         }
     }).mount('#app');

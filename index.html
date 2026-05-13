@@ -203,11 +203,17 @@
                         </div>
                         <div class="min-w-0 flex-1 flex flex-col">
                             <div class="chat-markdown text-[15px] leading-relaxed text-gray-800" v-html="renderMarkdown(msg.content)"></div>
-                            <button @click.stop="copyMessage(msg.content, index)"
-                                    class="mt-2 h-8 w-8 rounded-md text-gray-400 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-gray-700 hover:bg-white/70 transition-all flex items-center justify-center text-sm self-end"
-                                    title="Copy message">
-                                <i :class="copiedMessageIndex === index ? 'fa-solid fa-check text-green-500' : 'fa-regular fa-copy'"></i>
-                            </button>
+                            <div class="mt-2 flex items-center gap-2 self-end">
+                                <span v-if="msg.taskType"
+                                      class="text-[11px] text-gray-400 border border-gray-200 rounded-full px-2 py-0.5 leading-snug opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+                                    {{ getTaskTypeLabel(msg.taskType) }}
+                                </span>
+                                <button @click.stop="copyMessage(msg.content, index)"
+                                        class="h-8 w-8 rounded-md text-gray-400 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-gray-700 hover:bg-white/70 transition-all flex items-center justify-center text-sm"
+                                        title="Copy message">
+                                    <i :class="copiedMessageIndex === index ? 'fa-solid fa-check text-green-500' : 'fa-regular fa-copy'"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </template>
@@ -414,8 +420,22 @@
             const aiPopupInput = ref('');
             const aiPopupInputRef = ref(null);
 
+            const taskTypeLabels = {
+                general_chat: '普通聊天',
+                document_qa: '知识问答',
+                local_edit: '局部调整',
+                global_edit: '全文调整'
+            };
+            const normalizeTaskType = (taskType = '') => Object.hasOwn(taskTypeLabels, taskType) ? taskType : '';
+            const getTaskTypeLabel = (taskType = '') => taskTypeLabels[taskType] || taskType;
+
             const createNoticeMessage = (content = '') => ({ role: 'ai', kind: 'notice', content });
-            const createAnswerMessage = (content = '') => ({ role: 'ai', kind: 'answer', content });
+            const createAnswerMessage = (content = '', taskType = '') => ({
+                role: 'ai',
+                kind: 'answer',
+                content,
+                taskType: normalizeTaskType(taskType)
+            });
             const normalizeMessage = (message = {}) => {
                 const role = message.role === 'user' ? 'user' : 'ai';
                 if (role === 'user') {
@@ -424,7 +444,8 @@
                 return {
                     role,
                     kind: message.kind || 'answer',
-                    content: message.content || ''
+                    content: message.content || '',
+                    taskType: normalizeTaskType(message.taskType || message.task_type || '')
                 };
             };
             const isAnswerMessage = (message = {}) => message.role === 'ai' && message.kind === 'answer';
@@ -1169,10 +1190,11 @@
                 isModifying.value = true;
                 let aiIndex = -1;
                 let noticeGenerated = false;
+                let pendingTaskType = '';
 
                 const ensureAiMessage = async () => {
                     if (aiIndex >= 0) return;
-                    messages.value.push(createAnswerMessage(''));
+                    messages.value.push(createAnswerMessage('', pendingTaskType));
                     aiIndex = messages.value.length - 1;
                     isThinking.value = false;
                     await nextTick();
@@ -1206,6 +1228,16 @@
                     await readEventStream(response, async ({ event, data }) => {
                         if (event === 'conversation' && data.conversation_id) {
                             setCurrentConversationId(data.conversation_id);
+                        }
+
+                        if (event === 'node_end' && data.node === 'intent') {
+                            const taskType = normalizeTaskType(data.output?.task_type);
+                            if (taskType) {
+                                pendingTaskType = taskType;
+                                if (aiIndex >= 0) {
+                                    messages.value[aiIndex].taskType = taskType;
+                                }
+                            }
                         }
 
                         if (event === 'chat_chunk') {
@@ -1432,6 +1464,7 @@
                 openLibrary,
                 renderMarkdown,
                 isAnswerMessage,
+                getTaskTypeLabel,
                 copyMessage,
                 copiedMessageIndex
             };

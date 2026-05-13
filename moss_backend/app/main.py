@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.agent.checkpointing import open_sqlite_checkpointer
 from app.agent.graph import compile_agent_graph
@@ -39,10 +40,16 @@ app.add_middleware(
 app.include_router(api_router)
 app.include_router(document_router)
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+STATIC_DIR = PROJECT_ROOT / "static"
+
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 
 @app.get("/", include_in_schema=False)
 async def frontend_entry():
-    index_path = Path(__file__).resolve().parents[2] / "index.html"
+    index_path = PROJECT_ROOT / "index.html"
     if index_path.exists():
         return FileResponse(index_path)
     return JSONResponse({"status": "ok", "message": "Moss backend is running"})
@@ -51,7 +58,7 @@ async def frontend_entry():
 @app.get("/library", include_in_schema=False)
 @app.get("/library.html", include_in_schema=False)
 async def library_entry():
-    library_path = Path(__file__).resolve().parents[2] / "library.html"
+    library_path = PROJECT_ROOT / "library.html"
     if library_path.exists():
         return FileResponse(library_path)
     return JSONResponse(

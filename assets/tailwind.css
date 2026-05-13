@@ -1,0 +1,8 @@
+@import "tailwindcss";
+
+@source "../index.html";
+@source "../library.html";
+
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+}

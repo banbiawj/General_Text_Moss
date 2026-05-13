@@ -282,6 +282,14 @@ class NotesApiTests(unittest.TestCase):
         self.assertEqual(response_html.status_code, 200)
         self.assertIn("text/html", response_html.headers["content-type"])
 
+    def test_static_tailwind_css_is_served(self) -> None:
+        with TestClient(app) as client:
+            response = client.get("/static/css/tailwind.css")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/css", response.headers["content-type"])
+        self.assertIn("--font-sans", response.text)
+
 
 if __name__ == "__main__":
     unittest.main()

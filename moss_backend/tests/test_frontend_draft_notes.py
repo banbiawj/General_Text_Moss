@@ -29,6 +29,14 @@ class FrontendDraftNoteTests(unittest.TestCase):
         )
         self.assertIn("await ensurePersistedNote(requestAnchors.canvasSnapshot, { allowBlank: true });", index_html)
 
+    def test_frontend_uses_local_tailwind_stylesheet(self) -> None:
+        for html_name in ("index.html", "library.html"):
+            html = (self.repo_root() / html_name).read_text(encoding="utf-8")
+
+            self.assertIn('<link rel="stylesheet" href="/static/css/tailwind.css">', html)
+            self.assertNotIn("https://cdn.tailwindcss.com", html)
+            self.assertNotIn("tailwind.config", html)
+
 
 if __name__ == "__main__":
     unittest.main()

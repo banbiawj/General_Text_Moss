@@ -60,6 +60,16 @@ class FrontendDraftNoteTests(unittest.TestCase):
         self.assertLess(rename_index, delete_index)
         self.assertLess(delete_index, pin_index)
 
+    def test_library_dates_and_card_hover_have_recency_cues(self) -> None:
+        library_html = (self.repo_root() / "library.html").read_text(encoding="utf-8")
+
+        self.assertIn("transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease;", library_html)
+        self.assertIn("transform: translateY(-2px);", library_html)
+        self.assertIn("const diffMs = Date.now() - date.getTime();", library_html)
+        self.assertIn("if (diffMinutes < 1) return '刚刚';", library_html)
+        self.assertIn("return `${diffHours}小时前`;", library_html)
+        self.assertIn("return '昨天';", library_html)
+
 
 if __name__ == "__main__":
     unittest.main()

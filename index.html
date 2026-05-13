@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>moss - 智能文档助手</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/css/tailwind.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 
@@ -18,18 +18,51 @@
     }
     </script>
 
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: { sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'] },
-                }
-            }
-        }
-    </script>
-
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #fafafa; color: #171717; }
+        [v-cloak] { display: none !important; }
+
+        .app-loading {
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #fafafa;
+            color: #525252;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            transition: opacity .2s ease;
+        }
+
+        .app-loading-hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .app-loading-panel {
+            display: flex;
+            align-items: center;
+            gap: .75rem;
+            padding: .75rem 1rem;
+            border: 1px solid #e5e5e5;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, .9);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, .04);
+            font-size: .875rem;
+            font-weight: 500;
+        }
+
+        .app-loading-spinner {
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid #d4d4d4;
+            border-top-color: #171717;
+            border-radius: 999px;
+            animation: loading-spin .8s linear infinite;
+        }
+
+        @keyframes loading-spin { to { transform: rotate(360deg); } }
 
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -57,7 +90,14 @@
 </head>
 <body class="h-screen w-screen overflow-hidden selection:bg-black selection:text-white">
 
-<div id="app" class="relative h-full w-full flex flex-col bg-[#fafafa]" :class="{'resizing': isDragging}">
+<div id="app-loading" class="app-loading" role="status" aria-live="polite">
+    <div class="app-loading-panel">
+        <div class="app-loading-spinner" aria-hidden="true"></div>
+        <span>正在加载</span>
+    </div>
+</div>
+
+<div id="app" v-cloak class="relative h-full w-full flex flex-col bg-[#fafafa]" :class="{'resizing': isDragging}">
 
     <div v-if="showAIPopup"
          class="fixed z-[200] bg-white rounded-lg shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-200 p-2 flex items-center gap-3 w-[min(20rem,calc(100vw-2rem))] transform transition-all duration-200 ease-out"
@@ -215,6 +255,13 @@
     import { createApp, ref, nextTick, onMounted, onUnmounted } from 'vue';
     import { Editor, Node, mergeAttributes, Extension } from '@tiptap/core';
     import StarterKit from '@tiptap/starter-kit';
+
+    const hideInitialLoading = () => {
+        const loading = document.getElementById('app-loading');
+        if (!loading) return;
+        loading.classList.add('app-loading-hidden');
+        window.setTimeout(() => loading.remove(), 220);
+    };
 
     const DEFAULT_API_BASE = 'http://127.0.0.1:8000';
     const API_BASE = window.MOSS_API_BASE || (window.location.protocol.startsWith('http') ? window.location.origin : DEFAULT_API_BASE);
@@ -1188,53 +1235,57 @@
 
             onMounted(async () => {
                 try {
-                    await loadCurrentNote();
-                } catch (error) {
-                    noteLoadError.value = error.message || '加载笔记失败';
-                    messages.value.push({ role: 'ai', content: `加载笔记失败：${noteLoadError.value}` });
-                    contentHTML.value = '<p></p>';
-                }
-
-                tiptapEditor = new Editor({
-                    element: editorContainer.value,
-                    extensions: [
-                        StarterKit,
-                        CustomDiv,
-                        GlobalAttributes
-                    ],
-                    content: contentHTML.value,
-                    editorProps: {
-                        attributes: {
-                            spellcheck: 'false',
-                        },
-                        handlePaste: () => {
-                            window.setTimeout(() => {
-                                ensureTopLevelBlockIds();
-                                updateLastFocusAnchor();
-                            }, 0);
-                            return false;
-                        }
-                    },
-                    onSelectionUpdate: () => {
-                        updateLastFocusAnchor();
-                    },
-                    onUpdate: ({ editor }) => {
-                        contentHTML.value = editor.getHTML();
-                        if (!isMaintainingDocumentIds) queueAutosave();
-                        if (isMaintainingDocumentIds) return;
-                        const signature = topLevelStructureSignature();
-                        if (signature !== lastTopLevelSignature) {
-                            lastTopLevelSignature = signature;
-                            queueTopLevelIdMaintenance();
-                        }
+                    try {
+                        await loadCurrentNote();
+                    } catch (error) {
+                        noteLoadError.value = error.message || '加载笔记失败';
+                        messages.value.push({ role: 'ai', content: `加载笔记失败：${noteLoadError.value}` });
+                        contentHTML.value = '<p></p>';
                     }
-                });
-                cleanupTemporaryAnchors();
-                ensureTopLevelBlockIds();
-                refreshTopLevelSignature();
 
-                window.addEventListener('keydown', handleKeyDown);
-                window.addEventListener('resize', handleResize);
+                    tiptapEditor = new Editor({
+                        element: editorContainer.value,
+                        extensions: [
+                            StarterKit,
+                            CustomDiv,
+                            GlobalAttributes
+                        ],
+                        content: contentHTML.value,
+                        editorProps: {
+                            attributes: {
+                                spellcheck: 'false',
+                            },
+                            handlePaste: () => {
+                                window.setTimeout(() => {
+                                    ensureTopLevelBlockIds();
+                                    updateLastFocusAnchor();
+                                }, 0);
+                                return false;
+                            }
+                        },
+                        onSelectionUpdate: () => {
+                            updateLastFocusAnchor();
+                        },
+                        onUpdate: ({ editor }) => {
+                            contentHTML.value = editor.getHTML();
+                            if (!isMaintainingDocumentIds) queueAutosave();
+                            if (isMaintainingDocumentIds) return;
+                            const signature = topLevelStructureSignature();
+                            if (signature !== lastTopLevelSignature) {
+                                lastTopLevelSignature = signature;
+                                queueTopLevelIdMaintenance();
+                            }
+                        }
+                    });
+                    cleanupTemporaryAnchors();
+                    ensureTopLevelBlockIds();
+                    refreshTopLevelSignature();
+
+                    window.addEventListener('keydown', handleKeyDown);
+                    window.addEventListener('resize', handleResize);
+                } finally {
+                    hideInitialLoading();
+                }
             });
 
             onUnmounted(() => {

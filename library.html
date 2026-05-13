@@ -16,6 +16,50 @@
     </script>
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #fafafa; color: #171717; }
+        [v-cloak] { display: none !important; }
+
+        .app-loading {
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #fafafa;
+            color: #525252;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            transition: opacity .2s ease;
+        }
+
+        .app-loading-hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .app-loading-panel {
+            display: flex;
+            align-items: center;
+            gap: .75rem;
+            padding: .75rem 1rem;
+            border: 1px solid #e5e5e5;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, .9);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, .04);
+            font-size: .875rem;
+            font-weight: 500;
+        }
+
+        .app-loading-spinner {
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid #d4d4d4;
+            border-top-color: #171717;
+            border-radius: 999px;
+            animation: loading-spin .8s linear infinite;
+        }
+
+        @keyframes loading-spin { to { transform: rotate(360deg); } }
+
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .masonry-grid { column-count: 1; column-gap: 1.25rem; }
@@ -29,7 +73,14 @@
     </style>
 </head>
 <body class="h-screen w-screen overflow-hidden selection:bg-black selection:text-white flex text-[15px]">
-<div id="app" class="h-full w-full flex bg-[#fafafa] relative" @click="closeNoteMenu">
+<div id="app-loading" class="app-loading" role="status" aria-live="polite">
+    <div class="app-loading-panel">
+        <div class="app-loading-spinner" aria-hidden="true"></div>
+        <span>正在加载</span>
+    </div>
+</div>
+
+<div id="app" v-cloak class="h-full w-full flex bg-[#fafafa] relative" @click="closeNoteMenu">
     <div v-if="isSidebarOpen && isMobile"
          class="fixed inset-0 bg-black/20 backdrop-blur-[2px] z-40 md:hidden"
          @click.stop="toggleSidebar"></div>
@@ -224,6 +275,13 @@
 
 <script type="module">
     import { createApp, ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
+
+    const hideInitialLoading = () => {
+        const loading = document.getElementById('app-loading');
+        if (!loading) return;
+        loading.classList.add('app-loading-hidden');
+        window.setTimeout(() => loading.remove(), 220);
+    };
 
     const DEFAULT_API_BASE = 'http://127.0.0.1:8000';
     const API_BASE = window.MOSS_API_BASE || (window.location.protocol.startsWith('http') ? window.location.origin : DEFAULT_API_BASE);
@@ -431,6 +489,7 @@
                 checkScreenSize();
                 window.addEventListener('resize', checkScreenSize);
                 loadNotes();
+                hideInitialLoading();
             });
 
             onUnmounted(() => {

@@ -37,6 +37,29 @@ class FrontendDraftNoteTests(unittest.TestCase):
             self.assertNotIn("https://cdn.tailwindcss.com", html)
             self.assertNotIn("tailwind.config", html)
 
+    def test_library_note_card_actions_are_direct_icon_buttons(self) -> None:
+        library_html = (self.repo_root() / "library.html").read_text(encoding="utf-8")
+
+        self.assertNotIn("fa-ellipsis", library_html)
+        self.assertNotIn("openMenuNoteId", library_html)
+        self.assertNotIn("toggleNoteMenu", library_html)
+        self.assertIn("@click.stop=\"togglePinned(note)\"", library_html)
+        self.assertIn("@click.stop=\"startRename(note)\"", library_html)
+        self.assertIn("@click.stop=\"startDelete(note)\"", library_html)
+        self.assertIn('class="absolute top-3 right-3 md:top-4 md:right-4 flex gap-1 z-10"', library_html)
+        self.assertNotIn("absolute bottom-3 right-3", library_html)
+        self.assertIn("note.pinned_at ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'", library_html)
+        self.assertIn("hover:text-red-600", library_html)
+        self.assertIn("leading-snug pr-24 break-words", library_html)
+        self.assertNotIn("border-t border-gray-50/50 pr-16", library_html)
+        self.assertNotIn("bg-white/90 backdrop-blur-sm shadow-sm border border-gray-100", library_html)
+
+        rename_index = library_html.index('@click.stop="startRename(note)"')
+        delete_index = library_html.index('@click.stop="startDelete(note)"')
+        pin_index = library_html.index('@click.stop="togglePinned(note)"')
+        self.assertLess(rename_index, delete_index)
+        self.assertLess(delete_index, pin_index)
+
 
 if __name__ == "__main__":
     unittest.main()

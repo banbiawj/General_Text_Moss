@@ -39,7 +39,7 @@
     </div>
 </div>
 
-<div id="app" v-cloak class="h-full w-full flex bg-[#fafafa] relative" @click="closeNoteMenu">
+<div id="app" v-cloak class="h-full w-full flex bg-[#fafafa] relative">
     <div v-if="isSidebarOpen && isMobile"
          class="fixed inset-0 bg-black/20 backdrop-blur-[2px] z-40 md:hidden"
          @click.stop="toggleSidebar"></div>
@@ -140,34 +140,30 @@
                          :key="note.note_id"
                          @click="openNote(note)"
                          class="note-item bg-white border border-gray-200/80 rounded-lg p-4 md:p-5 cursor-pointer group relative">
-                        <div class="absolute top-3 right-3 md:top-4 md:right-4 flex gap-1.5 bg-white/90 backdrop-blur-sm px-1.5 py-1 rounded-md shadow-sm border border-gray-100 z-10 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+                        <div class="absolute top-3 right-3 md:top-4 md:right-4 flex gap-1 z-10"
                              @click.stop>
+                            <button @click.stop="startRename(note)"
+                                    class="text-gray-400 hover:text-black transition w-7 h-7 flex md:hidden md:group-hover:flex items-center justify-center rounded-md hover:bg-gray-50"
+                                    title="重命名">
+                                <i class="fa-regular fa-pen-to-square text-xs"></i>
+                            </button>
+                            <button @click.stop="startDelete(note)"
+                                    class="text-gray-400 hover:text-red-600 transition w-7 h-7 flex md:hidden md:group-hover:flex items-center justify-center rounded-md hover:bg-red-50"
+                                    title="删除">
+                                <i class="fa-regular fa-trash-can text-xs"></i>
+                            </button>
                             <button @click.stop="togglePinned(note)"
-                                    class="text-gray-400 hover:text-black transition w-7 h-7 flex items-center justify-center rounded hover:bg-gray-50"
+                                    :class="[
+                                        note.pinned_at ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100',
+                                        note.pinned_at ? 'flex' : 'flex md:hidden md:group-hover:flex'
+                                    ]"
+                                    class="text-gray-400 hover:text-black transition w-7 h-7 items-center justify-center rounded-md hover:bg-gray-50"
                                     :title="note.pinned_at ? '取消置顶' : '置顶'">
                                 <i :class="note.pinned_at ? 'fa-solid fa-thumbtack text-black' : 'fa-solid fa-thumbtack'" class="text-xs"></i>
                             </button>
-                            <button @click.stop="toggleNoteMenu(note, $event)"
-                                    class="text-gray-400 hover:text-black transition w-7 h-7 flex items-center justify-center rounded hover:bg-gray-50"
-                                    title="更多">
-                                <i class="fa-solid fa-ellipsis text-xs"></i>
-                            </button>
-                            <div v-if="openMenuNoteId === note.note_id"
-                                 class="absolute right-0 top-9 w-36 rounded-lg border border-gray-100 bg-white shadow-lg py-1 text-sm text-gray-700"
-                                 @click.stop>
-                                <button @click.stop="startRename(note)" class="w-full px-3 py-2 text-left hover:bg-gray-50 flex items-center gap-2">
-                                    <i class="fa-regular fa-pen-to-square text-xs text-gray-400"></i> 重命名
-                                </button>
-                                <button @click.stop="togglePinned(note)" class="w-full px-3 py-2 text-left hover:bg-gray-50 flex items-center gap-2">
-                                    <i class="fa-solid fa-thumbtack text-xs text-gray-400"></i> {{ note.pinned_at ? '取消置顶' : '置顶' }}
-                                </button>
-                                <button @click.stop="startDelete(note)" class="w-full px-3 py-2 text-left hover:bg-red-50 text-red-600 flex items-center gap-2">
-                                    <i class="fa-regular fa-trash-can text-xs"></i> 删除
-                                </button>
-                            </div>
                         </div>
 
-                        <h3 class="font-medium text-gray-900 text-[15px] md:text-base mb-2 md:mb-3 leading-snug pr-14 break-words">
+                        <h3 class="font-medium text-gray-900 text-[15px] md:text-base mb-2 md:mb-3 leading-snug pr-24 break-words">
                             {{ noteTitle(note) }}
                         </h3>
                         <div class="text-gray-600 text-[13px] md:text-[14px] leading-relaxed line-clamp-custom font-light whitespace-pre-wrap break-words">
@@ -267,7 +263,6 @@
             const viewMode = ref(localStorage.getItem('moss-library-view-mode') || 'grid');
             const isSidebarOpen = ref(true);
             const isMobile = ref(false);
-            const openMenuNoteId = ref('');
             const renameNote = ref(null);
             const renameValue = ref('');
             const renameInputRef = ref(null);
@@ -374,17 +369,7 @@
                 localStorage.setItem('moss-library-view-mode', viewMode.value);
             };
 
-            const toggleNoteMenu = (note, event) => {
-                event?.stopPropagation?.();
-                openMenuNoteId.value = openMenuNoteId.value === note.note_id ? '' : note.note_id;
-            };
-
-            const closeNoteMenu = () => {
-                openMenuNoteId.value = '';
-            };
-
             const togglePinned = async (note) => {
-                closeNoteMenu();
                 try {
                     await patchNote(note, { pinned: !note.pinned_at });
                     notes.value = [...notes.value].sort(compareNotes);
@@ -394,7 +379,6 @@
             };
 
             const startRename = async (note) => {
-                closeNoteMenu();
                 renameNote.value = note;
                 renameValue.value = note.display_title || note.title || '';
                 await nextTick();
@@ -417,7 +401,6 @@
             };
 
             const startDelete = (note) => {
-                closeNoteMenu();
                 deleteNoteTarget.value = note;
             };
 
@@ -479,7 +462,6 @@
                 viewMode,
                 isSidebarOpen,
                 isMobile,
-                openMenuNoteId,
                 renameNote,
                 renameValue,
                 renameInputRef,
@@ -491,8 +473,6 @@
                 toggleViewMode,
                 toggleSidebar,
                 closeSidebarOnMobile,
-                toggleNoteMenu,
-                closeNoteMenu,
                 togglePinned,
                 startRename,
                 cancelRename,

@@ -25,6 +25,36 @@
         .note-item { transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease; }
         .note-item:hover { border-color: #d4d4d4; box-shadow: 0 4px 20px rgba(0,0,0,.04); transform: translateY(-2px); }
         .line-clamp-custom { display: -webkit-box; -webkit-line-clamp: 8; -webkit-box-orient: vertical; overflow: hidden; }
+        .floating-create-note {
+            position: fixed;
+            right: 1rem;
+            bottom: calc(1rem + env(safe-area-inset-bottom));
+            z-index: 30;
+            width: 3.25rem;
+            height: 3.25rem;
+            border: 0;
+            border-radius: 9999px;
+            background: #000;
+            color: #fff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 14px 30px rgba(0,0,0,.18);
+            transition: transform .18s ease, box-shadow .18s ease, background-color .18s ease, opacity .18s ease;
+        }
+        .floating-create-note:hover { background: #171717; box-shadow: 0 18px 36px rgba(0,0,0,.22); transform: translateY(-2px); }
+        .floating-create-note:active { transform: translateY(0) scale(.96); }
+        .floating-create-note:disabled { cursor: not-allowed; opacity: .68; transform: none; }
+        .floating-create-note:focus-visible { outline: 2px solid #111827; outline-offset: 3px; }
+        .floating-create-note i { font-size: 1.1rem; line-height: 1; }
+        @media (min-width: 640px) {
+            .floating-create-note {
+                right: 1.5rem;
+                bottom: calc(1.5rem + env(safe-area-inset-bottom));
+                width: 3.5rem;
+                height: 3.5rem;
+            }
+        }
     </style>
 </head>
 <body class="h-screen w-screen overflow-hidden selection:bg-black selection:text-white flex text-[15px]">
@@ -238,6 +268,15 @@
             </div>
         </div>
     </main>
+
+    <button @click="createNote"
+            :disabled="isCreating"
+            class="floating-create-note"
+            aria-label="新建笔记"
+            title="新建笔记">
+        <i v-if="isCreating" class="fa-solid fa-circle-notch fa-spin"></i>
+        <i v-else class="fa-solid fa-plus"></i>
+    </button>
 
     <div v-if="renameNote"
          class="fixed inset-0 z-[70] flex items-center justify-center bg-black/20 px-4"

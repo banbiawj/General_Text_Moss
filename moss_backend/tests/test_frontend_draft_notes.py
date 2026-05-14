@@ -17,6 +17,20 @@ class FrontendDraftNoteTests(unittest.TestCase):
             library_html,
         )
 
+    def test_library_has_floating_create_note_button(self) -> None:
+        library_html = (self.repo_root() / "library.html").read_text(encoding="utf-8")
+
+        self.assertIn(".floating-create-note {", library_html)
+        self.assertIn("bottom: calc(1rem + env(safe-area-inset-bottom));", library_html)
+        self.assertIn("z-index: 30;", library_html)
+        self.assertIn('class="floating-create-note"', library_html)
+        self.assertIn('@click="createNote"', library_html)
+        self.assertIn(':disabled="isCreating"', library_html)
+        self.assertIn('aria-label="新建笔记"', library_html)
+        self.assertIn('title="新建笔记"', library_html)
+        self.assertIn('fa-solid fa-plus', library_html)
+        self.assertIn('fa-solid fa-circle-notch fa-spin', library_html)
+
     def test_editor_deferred_persistence_for_blank_drafts(self) -> None:
         index_html = (self.repo_root() / "index.html").read_text(encoding="utf-8")
 

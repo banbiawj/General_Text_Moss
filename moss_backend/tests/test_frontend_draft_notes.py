@@ -70,6 +70,32 @@ class FrontendDraftNoteTests(unittest.TestCase):
         self.assertIn("return `${diffHours}小时前`;", library_html)
         self.assertIn("return '昨天';", library_html)
 
+    def test_library_grid_uses_data_driven_masonry_columns(self) -> None:
+        library_html = (self.repo_root() / "library.html").read_text(encoding="utf-8")
+
+        self.assertIn("const columnCount = ref(1);", library_html)
+        self.assertIn("const updateColumnCount = () =>", library_html)
+        self.assertIn("if (width >= 1536) columnCount.value = 4;", library_html)
+        self.assertIn("else if (width >= 1024) columnCount.value = 3;", library_html)
+        self.assertIn("else if (width >= 640) columnCount.value = 2;", library_html)
+        self.assertIn("const masonryColumns = computed(() =>", library_html)
+        self.assertIn("Array.from({ length: columnCount.value }, () => [])", library_html)
+        self.assertIn("cols[index % columnCount.value].push(note);", library_html)
+        self.assertIn("const handleResize = () =>", library_html)
+        self.assertIn("window.addEventListener('resize', handleResize);", library_html)
+        self.assertIn("window.removeEventListener('resize', handleResize);", library_html)
+        self.assertIn("masonryColumns,", library_html)
+
+        self.assertIn('v-if="viewMode === \'grid\'" class="flex gap-5 items-start"', library_html)
+        self.assertIn('v-for="(col, colIndex) in masonryColumns"', library_html)
+        self.assertIn('v-for="note in col"', library_html)
+        self.assertIn('<div v-else class="list-layout">', library_html)
+
+        self.assertNotIn("column-count", library_html)
+        self.assertNotIn("break-inside", library_html)
+        self.assertNotIn("page-break-inside", library_html)
+        self.assertNotIn("margin-bottom: 1.25rem", library_html)
+
     def test_frontend_contains_note_discussion_switching_hooks(self) -> None:
         index_html = (self.repo_root() / "index.html").read_text(encoding="utf-8")
         library_html = (self.repo_root() / "library.html").read_text(encoding="utf-8")

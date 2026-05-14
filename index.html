@@ -42,6 +42,16 @@
         .document-content strong { color: #171717; font-weight: 600; }
         .document-content code { background-color: #f5f5f5; padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-size: 0.85em; font-family: monospace; }
         .ProseMirror:focus { outline: none; }
+        .editor-frame {
+            background: #f8fafc;
+            border-color: #d0d7de;
+            box-shadow: 0 8px 30px rgb(15 23 42 / 0.04);
+            transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+        }
+        .editor-frame:focus-within {
+            border-color: #b8c7d6;
+            box-shadow: 0 10px 34px rgb(15 23 42 / 0.06), 0 0 0 3px rgb(148 163 184 / 0.18);
+        }
 
         .chat-markdown { white-space: normal; overflow-x: auto; }
         .chat-markdown :where(p) { margin: 0 0 0.75rem; }
@@ -112,7 +122,7 @@
     </button>
 
     <div ref="panelRef"
-         class="fixed left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 flex flex-col overflow-visible origin-top"
+         class="editor-frame fixed left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 flex flex-col overflow-visible origin-top"
          :class="[
             isFullScreen ? 'rounded-none z-[100]' : 'rounded-2xl z-40',
             isDragging ? 'transition-none' : 'transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]'

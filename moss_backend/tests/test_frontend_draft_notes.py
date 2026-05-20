@@ -205,6 +205,28 @@ class FrontendDraftNoteTests(unittest.TestCase):
         self.assertIn("const top = buttonRect ? buttonRect.bottom + 14 : fallbackTop;", index_html)
         self.assertNotIn("top: '40%'", index_html)
 
+    def test_chat_composer_wraps_long_input_without_covering_history(self) -> None:
+        index_html = (self.repo_root() / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn('class="chat-scroll-shell relative w-full max-w-4xl', index_html)
+        self.assertIn(".chat-scroll-shell {", index_html)
+        self.assertIn("padding-bottom: 14rem;", index_html)
+        self.assertIn(".chat-composer-input {", index_html)
+        self.assertIn("white-space: pre-wrap;", index_html)
+        self.assertIn("overflow-wrap: anywhere;", index_html)
+        self.assertIn("max-height: 10rem;", index_html)
+        self.assertIn("resize: none;", index_html)
+        self.assertIn("ref=\"inputTextareaRef\"", index_html)
+        self.assertIn("<textarea v-model=\"inputText\"", index_html)
+        self.assertIn("@input=\"adjustInputTextareaHeight\"", index_html)
+        self.assertIn("@keydown.enter.exact.prevent=\"sendMessage()\"", index_html)
+        self.assertIn("@keydown.enter.shift.stop", index_html)
+        self.assertIn("const inputTextareaRef = ref(null);", index_html)
+        self.assertIn("const adjustInputTextareaHeight = () =>", index_html)
+        self.assertIn("inputTextareaRef.value.style.height = 'auto';", index_html)
+        self.assertIn("inputTextareaRef.value.style.height = `${inputTextareaRef.value.scrollHeight}px`;", index_html)
+        self.assertNotIn('type="text"\n                   placeholder=', index_html)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -79,6 +79,18 @@
         .chat-composer {
             bottom: calc(1.5rem + env(safe-area-inset-bottom));
         }
+        .floating-discussions-button {
+            left: -3rem;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        @media (max-width: 640px) {
+            .floating-discussions-button {
+                left: 0.5rem;
+                top: -3rem;
+                transform: none;
+            }
+        }
         .chat-composer-frame {
             align-items: flex-end;
             border-radius: 1.5rem;
@@ -168,32 +180,34 @@
                 <i class="fa-regular fa-file-lines text-gray-400"></i>
                 <div ref="conversationTreeRef" class="relative flex items-center gap-2 min-w-0" @click.stop>
                     <span class="font-medium text-xs tracking-wider uppercase text-gray-500 truncate">{{ documentTitle }}</span>
-                    <button v-if="currentNoteId"
-                            @click="toggleConversationTree"
-                            class="h-7 rounded-md px-2 text-[11px] text-gray-500 hover:bg-gray-100 hover:text-gray-800 transition-colors flex items-center gap-1 shrink-0"
-                            :title="showConversationTree ? 'Close discussions' : 'Open discussions'">
-                        <span>{{ noteConversations.length || 1 }}</span>
-                        <i :class="showConversationTree ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down'" class="text-[9px]"></i>
-                    </button>
                 </div>
             </div>
-            <div class="flex gap-2 md:gap-3 items-center">
-                <span v-if="isModifying" class="hidden sm:flex text-xs text-gray-500 items-center gap-2 pr-2">
-                    <i class="fa-solid fa-pen-nib animate-bounce text-xs"></i> AI Processing
-                </span>
+            <div data-header-toolbar-actions class="flex gap-2 items-center shrink-0">
                 <input ref="fileInputRef" type="file" accept=".txt,.md,.markdown,.docx,.pdf" class="hidden" @change="handleUpload">
-                <button @click="triggerUpload"
-                        class="text-xs bg-white border border-gray-200 text-gray-700 px-3 md:px-4 py-2.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm font-medium flex items-center gap-2"
+                <button data-header-upload-button
+                        @click="triggerUpload"
+                        class="text-xs bg-white border h-9 border-gray-200 text-gray-700 px-3 md:px-4 py-2.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm font-medium flex items-center gap-2 shrink-0"
                         title="导入文档">
                     <i class="fa-solid fa-upload text-[11px]"></i>
                     <span class="hidden sm:inline">Upload</span>
                 </button>
-                <button @click="exportDocument('markdown')"
-                        class="text-xs bg-white border border-gray-200 text-gray-700 px-3 md:px-4 py-2.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm font-medium flex items-center gap-2"
+                <button data-header-export-button
+                        @click="exportDocument('markdown')"
+                        class="text-xs bg-white border h-9 border-gray-200 text-gray-700 px-3 md:px-4 py-2.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm font-medium flex items-center gap-2 shrink-0"
                         title="导出 Markdown">
                     <i class="fa-solid fa-download text-[11px]"></i>
                     <span class="hidden sm:inline">Export</span>
                 </button>
+                <button data-header-outline-button
+                        @click.stop="toggleDocumentOutline"
+                        class="text-xs bg-white border h-9 border-gray-200 text-gray-700 px-3 py-2.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm font-medium flex items-center justify-center shrink-0"
+                        :class="showDocumentOutline ? 'bg-gray-100 text-gray-900 border-gray-300' : ''"
+                        :title="showDocumentOutline ? 'Close outline' : 'Open outline'">
+                    <i class="fa-solid fa-list-ul text-[11px]"></i>
+                </button>
+                <span v-if="isModifying" class="hidden sm:flex text-xs text-gray-500 items-center gap-2 pr-2">
+                    <i class="fa-solid fa-pen-nib animate-bounce text-xs"></i> AI Processing
+                </span>
             </div>
         </div>
 
@@ -320,14 +334,6 @@
         <div v-if="conversationError" class="mt-1 px-2 py-1 text-xs text-red-500 truncate">{{ conversationError }}</div>
     </div>
 
-    <button v-if="currentNoteId && !showConversationTree"
-            @click.stop="openConversationTree"
-            class="fixed w-10 h-10 rounded-full bg-white/90 backdrop-blur-xl border border-gray-200 shadow-lg text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-center"
-            :style="conversationTreeButtonStyle"
-            title="打开讨论">
-        <i class="fa-regular fa-comment text-xs"></i>
-    </button>
-
     <div v-if="showDocumentOutline"
          ref="outlinePanelRef"
          class="fixed bg-white/80 backdrop-blur-xl border border-gray-100 rounded-xl text-gray-800 flex flex-col gap-1 overflow-hidden animate-pop-in"
@@ -364,14 +370,6 @@
             </div>
         </div>
     </div>
-
-    <button v-if="!showDocumentOutline"
-            @click.stop="openDocumentOutline"
-            class="fixed w-10 h-10 rounded-full bg-white/90 backdrop-blur-xl border border-gray-200 shadow-lg text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-center"
-            :style="outlineButtonStyle"
-            title="打开目录">
-        <i class="fa-solid fa-list-ul text-xs"></i>
-    </button>
 
     <div class="chat-scroll-shell relative w-full max-w-4xl mx-auto h-screen overflow-y-auto px-4 md:px-0 scroll-smooth no-scrollbar origin-top"
          id="chat-container"
@@ -455,6 +453,14 @@
     <div class="chat-composer fixed left-1/2 w-[95%] max-w-3xl z-50 transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]"
          style="will-change: transform, opacity;"
          :class="isFullScreen ? 'translate-y-[150px] -translate-x-1/2 opacity-0 pointer-events-none' : 'translate-y-0 -translate-x-1/2 opacity-100'">
+        <button v-if="currentNoteId"
+                data-floating-discussions-button
+                @click.stop="toggleConversationTree"
+                class="floating-discussions-button absolute w-10 h-10 rounded-full bg-white border border-gray-200 shadow-lg text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-center"
+                :class="showConversationTree ? 'bg-gray-100 text-gray-900 border-gray-300' : ''"
+                :title="showConversationTree ? 'Close discussions' : 'Open discussions'">
+            <i class="fa-regular fa-comment text-[12px]"></i>
+        </button>
         <div class="chat-composer-frame bg-white shadow-[0_4px_20px_rgb(0,0,0,0.05)] border border-gray-200 p-2 pl-5 flex gap-3 transition-all focus-within:border-gray-300">
             <textarea v-model="inputText"
                       ref="inputTextareaRef"
@@ -603,11 +609,6 @@
                 maxHeight: 'calc(100vh - 8rem)',
                 zIndex: 1000
             });
-            const conversationTreeButtonStyle = ref({
-                left: '1rem',
-                top: '5.5rem',
-                zIndex: 1000
-            });
             const isConversationTreeCompact = ref(false);
             const documentOutline = ref([]);
             const activeOutlineId = ref('');
@@ -618,11 +619,6 @@
                 top: '5.5rem',
                 width: '14.75rem',
                 maxHeight: 'calc(100vh - 8rem)',
-                zIndex: 1000
-            });
-            const outlineButtonStyle = ref({
-                right: '1rem',
-                top: '5.5rem',
                 zIndex: 1000
             });
 
@@ -1091,11 +1087,6 @@
                     top: `${top}px`,
                     width: `${treeWidth}px`,
                     maxHeight: `${maxHeight}px`,
-                    zIndex: 1000
-                };
-                conversationTreeButtonStyle.value = {
-                    left: `${Math.max(pagePadding, Math.min(treeLeft, window.innerWidth - 52))}px`,
-                    top: `${top}px`,
                     zIndex: 1000
                 };
             };
@@ -1725,11 +1716,6 @@
                         maxHeight: 'calc(100vh - 8rem)',
                         zIndex: 1000
                     };
-                    outlineButtonStyle.value = {
-                        right: '1rem',
-                        top: '5.5rem',
-                        zIndex: 1000
-                    };
                     return;
                 }
 
@@ -1751,12 +1737,6 @@
                     top: `${top}px`,
                     width: `${outlineWidth}px`,
                     maxHeight: `${maxHeight}px`,
-                    zIndex: 1000
-                };
-
-                outlineButtonStyle.value = {
-                    right: `${pagePadding}px`,
-                    top: `${top}px`,
                     zIndex: 1000
                 };
             };
@@ -1796,6 +1776,14 @@
 
             const closeDocumentOutline = () => {
                 showDocumentOutline.value = false;
+            };
+
+            const toggleDocumentOutline = () => {
+                if (showDocumentOutline.value) {
+                    closeDocumentOutline();
+                    return;
+                }
+                openDocumentOutline();
             };
 
             const handleKeyDown = (e) => {
@@ -2173,18 +2161,17 @@
                 conversationTreeRef,
                 conversationTreePanelRef,
                 conversationTreeStyle,
-                conversationTreeButtonStyle,
                 isConversationTreeCompact,
                 documentOutline,
                 activeOutlineId,
                 showDocumentOutline,
                 outlineScrollSpacerHeight,
                 outlineStyle,
-                outlineButtonStyle,
                 outlineIndentClass,
                 isActiveOutlineItem,
                 openDocumentOutline,
                 closeDocumentOutline,
+                toggleDocumentOutline,
                 scrollToOutlineItem,
                 openConversationTree,
                 toggleConversationTree,

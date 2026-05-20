@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Literal
 from uuid import uuid4
 
 import yaml
@@ -58,11 +58,128 @@ TASK_TYPE_TOOLS: dict[TaskType, list[str]] = {
 # ── Intent Node ──────────────────────────────────────────────────────────
 
 
-class IntentOutput(BaseModel):
+IntentCandidateType = Literal[
+    "general_chat",
+    "document_qa",
+    "local_edit",
+    "global_edit",
+    "ambiguous",
+]
+
+
+class IntentCandidateOutput(BaseModel):
     """Structured output from the intent classifier LLM."""
+
+    task_type: IntentCandidateType = Field(description="意图分类结果")
+    task_reason: str = Field(description="判断原因，一句话说明为什么归为该类别")
+
+
+class IntentOutput(BaseModel):
+    """Executable intent output used by the graph after ambiguity is resolved."""
 
     task_type: TaskType = Field(description="意图分类结果")
     task_reason: str = Field(description="判断原因，一句话说明为什么归为该类别")
+
+
+def _invoke_intent_classifier(
+    *,
+    output_schema: type[BaseModel],
+    system_prompt: str,
+    user_content: str,
+) -> BaseModel:
+    settings = get_settings()
+    llm = (
+        ChatOpenAI(
+            api_key=settings.llm_api_key,
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
+            temperature=settings.llm_temperature,
+        )
+        .with_structured_output(output_schema, method="function_calling")
+    )
+    return llm.invoke(
+        [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_content),
+        ]
+    )
+
+
+def _message_role_for_intent(message: Any) -> str | None:
+    if isinstance(message, HumanMessage):
+        return "user"
+    if isinstance(message, AIMessage):
+        return "assistant"
+    return None
+
+
+def _truncate_intent_text(text: str, limit: int = 500) -> str:
+    normalized = " ".join(str(text or "").split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 1].rstrip() + "…"
+
+
+def _format_recent_intent_history(
+    messages: list[Any],
+    *,
+    current_user_input: str,
+    limit: int = 8,
+) -> str:
+    intent_messages = [
+        message
+        for message in messages
+        if _message_role_for_intent(message) is not None
+    ]
+
+    if intent_messages and isinstance(intent_messages[-1], HumanMessage):
+        last_content = _message_content_text(getattr(intent_messages[-1], "content", ""))
+        if last_content == current_user_input:
+            intent_messages = intent_messages[:-1]
+
+    recent = intent_messages[-limit:]
+    if not recent:
+        return "(无)"
+
+    lines: list[str] = []
+    for message in recent:
+        role = _message_role_for_intent(message)
+        content = _truncate_intent_text(
+            _message_content_text(getattr(message, "content", ""))
+        )
+        if role and content:
+            lines.append(f"{role}: {content}")
+    return "\n".join(lines) if lines else "(无)"
+
+
+def _format_contextual_intent_payload(state: AgentState) -> str:
+    user_input = state.get("user_input", "")
+    canvas_snapshot = state.get("canvas_snapshot", "")
+    focus_block_id = state.get("focus_block_id") or ""
+    focus_element_id = state.get("focus_element_id") or ""
+    has_canvas_snapshot = bool(str(canvas_snapshot or "").strip())
+    has_focus_block = bool(focus_block_id)
+    recent_history = _format_recent_intent_history(
+        list(state.get("messages", [])),
+        current_user_input=user_input,
+        limit=8,
+    )
+
+    return "\n".join(
+        [
+            "当前用户输入：",
+            user_input,
+            "",
+            "当前文档状态：",
+            f"- has_canvas_snapshot: {str(has_canvas_snapshot).lower()}",
+            f"- has_focus_block: {str(has_focus_block).lower()}",
+            f"- focus_block_id: {focus_block_id}",
+            f"- focus_element_id: {focus_element_id}",
+            "",
+            "最近 8 条聊天记录：",
+            recent_history,
+        ]
+    )
 
 
 def intent_node(state: AgentState) -> dict[str, Any]:
@@ -76,24 +193,25 @@ def intent_node(state: AgentState) -> dict[str, Any]:
         }
 
     system_prompt = _load_prompt_template(PROMPTS_DIR / "intent_prompt.yaml").format()
-
-    # Use function-calling method for structured output (compatible with DeepSeek and OpenAI)
-    llm = (
-        ChatOpenAI(
-            api_key=settings.llm_api_key,
-            base_url=settings.llm_base_url,
-            model=settings.llm_model,
-            temperature=settings.llm_temperature,
-        )
-        .with_structured_output(IntentOutput, method="function_calling")
+    result = _invoke_intent_classifier(
+        output_schema=IntentCandidateOutput,
+        system_prompt=system_prompt,
+        user_content=state.get("user_input", ""),
     )
 
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=state.get("user_input", "")),
-    ]
-
-    result: IntentOutput = llm.invoke(messages)
+    if result.task_type == "ambiguous":
+        contextual_prompt = _load_prompt_template(
+            PROMPTS_DIR / "contextual_intent_prompt.yaml"
+        ).format()
+        contextual_result = _invoke_intent_classifier(
+            output_schema=IntentOutput,
+            system_prompt=contextual_prompt,
+            user_content=_format_contextual_intent_payload(state),
+        )
+        return {
+            "task_type": contextual_result.task_type,
+            "task_reason": contextual_result.task_reason,
+        }
 
     return {
         "task_type": result.task_type,

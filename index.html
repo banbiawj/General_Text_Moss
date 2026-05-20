@@ -79,20 +79,8 @@
         .chat-composer {
             bottom: calc(1.5rem + env(safe-area-inset-bottom));
         }
-        .floating-discussions-button {
-            left: -3rem;
-            top: 50%;
-            transform: translateY(-50%);
-        }
-        @media (max-width: 640px) {
-            .floating-discussions-button {
-                left: 0.5rem;
-                top: -3rem;
-                transform: none;
-            }
-        }
         .chat-composer-frame {
-            align-items: flex-end;
+            align-items: stretch;
             border-radius: 1.5rem;
         }
         .chat-composer-input {
@@ -453,30 +441,37 @@
     <div class="chat-composer fixed left-1/2 w-[95%] max-w-3xl z-50 transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]"
          style="will-change: transform, opacity;"
          :class="isFullScreen ? 'translate-y-[150px] -translate-x-1/2 opacity-0 pointer-events-none' : 'translate-y-0 -translate-x-1/2 opacity-100'">
-        <button v-if="currentNoteId"
-                data-floating-discussions-button
-                @click.stop="toggleConversationTree"
-                class="floating-discussions-button absolute w-10 h-10 rounded-full bg-white border border-gray-200 shadow-lg text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-center"
-                :class="showConversationTree ? 'bg-gray-100 text-gray-900 border-gray-300' : ''"
-                :title="showConversationTree ? 'Close discussions' : 'Open discussions'">
-            <i class="fa-regular fa-comment text-[12px]"></i>
-        </button>
-        <div class="chat-composer-frame bg-white shadow-[0_4px_20px_rgb(0,0,0,0.05)] border border-gray-200 p-2 pl-5 flex gap-3 transition-all focus-within:border-gray-300">
-            <textarea v-model="inputText"
-                      ref="inputTextareaRef"
-                      @input="adjustInputTextareaHeight"
-                      @keydown.enter.exact.prevent="sendMessage()"
-                      @keydown.enter.shift.stop="allowTextareaNewline"
-                      rows="1"
-                      placeholder="与 moss 对话，输入指令以处理文本..."
-                      class="chat-composer-input flex-1 bg-transparent border-none outline-none text-[15px] text-gray-800 placeholder-gray-400 py-3 font-light min-w-0"
-                      :disabled="isModifying"></textarea>
-            <button @click="sendMessage()"
-                    :disabled="!inputText.trim() || isModifying"
-                    class="w-10 h-10 rounded-full bg-black hover:bg-gray-800 disabled:bg-gray-100 disabled:text-gray-400 text-white transition-all flex items-center justify-center shrink-0 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95"
-                    title="发送">
-                <i class="fa-solid fa-arrow-up text-sm"></i>
-            </button>
+        <div data-chat-composer-frame class="chat-composer-frame bg-white shadow-[0_4px_20px_rgb(0,0,0,0.05)] border border-gray-200 p-3 flex flex-col gap-2 transition-all focus-within:border-gray-300">
+            <div data-chat-composer-input-row class="flex w-full">
+                <textarea v-model="inputText"
+                          ref="inputTextareaRef"
+                          @input="adjustInputTextareaHeight"
+                          @keydown.enter.exact.prevent="sendMessage()"
+                          @keydown.enter.shift.stop="allowTextareaNewline"
+                          rows="1"
+                          placeholder="与 moss 对话，输入指令以处理文本..."
+                          class="chat-composer-input w-full bg-transparent border-none outline-none text-[15px] text-gray-800 placeholder-gray-400 py-2 font-light min-w-0"
+                          :disabled="isModifying"></textarea>
+            </div>
+            <div data-chat-composer-toolbar class="flex items-center justify-between gap-3 w-full">
+                <button v-if="currentNoteId"
+                        data-composer-conversation-button
+                        @click.stop="toggleConversationTree"
+                        class="min-w-0 max-w-[70%] h-8 px-3 rounded-full border border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors flex items-center gap-2 text-xs"
+                        :class="showConversationTree ? 'bg-gray-100 text-gray-900 border-gray-300' : ''"
+                        :title="showConversationTree ? 'Close discussions' : 'Open discussions'">
+                    <i class="fa-regular fa-comment text-[12px] shrink-0"></i>
+                    <span class="truncate">{{ currentConversationTitle() }}</span>
+                </button>
+                <div v-else class="min-w-0"></div>
+                <button data-composer-send-button
+                        @click="sendMessage()"
+                        :disabled="!inputText.trim() || isModifying"
+                        class="w-9 h-9 rounded-full bg-black hover:bg-gray-800 disabled:bg-gray-100 disabled:text-gray-400 text-white transition-all flex items-center justify-center shrink-0 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95"
+                        title="发送">
+                    <i class="fa-solid fa-arrow-up text-sm"></i>
+                </button>
+            </div>
         </div>
     </div>
 
@@ -1047,6 +1042,11 @@
 
             const conversationTitle = (conversation = {}) => {
                 return conversation.title || (conversation.is_default ? 'Default conversation' : 'New discussion');
+            };
+
+            const currentConversationTitle = () => {
+                const currentConversation = noteConversations.value.find((conversation) => isCurrentConversation(conversation));
+                return currentConversation ? conversationTitle(currentConversation) : 'Current discussion';
             };
 
             const isCurrentConversation = (conversation = {}) => {
@@ -2182,6 +2182,7 @@
                 cancelRenameConversation,
                 saveConversationTitle,
                 conversationTitle,
+                currentConversationTitle,
                 isCurrentConversation,
                 saveStatus,
                 noteLoadError,

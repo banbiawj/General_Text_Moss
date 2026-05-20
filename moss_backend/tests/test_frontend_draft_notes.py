@@ -205,6 +205,27 @@ class FrontendDraftNoteTests(unittest.TestCase):
         self.assertIn("const top = buttonRect ? buttonRect.bottom + 14 : fallbackTop;", index_html)
         self.assertNotIn("top: '40%'", index_html)
 
+    def test_discussion_tree_has_compact_floating_reopen_button(self) -> None:
+        index_html = (self.repo_root() / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("const isConversationTreeCompact = ref(false);", index_html)
+        self.assertIn("const conversationTreeButtonStyle = ref(", index_html)
+        self.assertIn("const openConversationTree = async () =>", index_html)
+        self.assertIn('v-if="currentNoteId && !showConversationTree"', index_html)
+        self.assertIn("@click.stop=\"openConversationTree\"", index_html)
+        self.assertIn(":style=\"conversationTreeButtonStyle\"", index_html)
+        self.assertIn('title="打开讨论"', index_html)
+        self.assertIn("fa-regular fa-comment text-xs", index_html)
+        self.assertNotIn("fa-regular fa-comments text-xs", index_html)
+        self.assertNotIn("absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-black text-white text-[10px] leading-4 text-center", index_html)
+        self.assertIn("const hasExternalLeftSpace = leftSpace >= preferredTreeWidth + pagePadding * 2;", index_html)
+        self.assertIn("isConversationTreeCompact.value = !hasExternalLeftSpace;", index_html)
+        self.assertIn("const treeLeft = hasExternalLeftSpace", index_html)
+        self.assertIn("conversationTreeButtonStyle.value = {", index_html)
+        self.assertIn("openConversationTree,", index_html)
+        self.assertIn("conversationTreeButtonStyle,", index_html)
+        self.assertIn("isConversationTreeCompact,", index_html)
+
     def test_chat_composer_wraps_long_input_without_covering_history(self) -> None:
         index_html = (self.repo_root() / "index.html").read_text(encoding="utf-8")
 

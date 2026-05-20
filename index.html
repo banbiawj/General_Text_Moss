@@ -255,7 +255,7 @@
             </div>
         </div>
 
-        <div class="mt-1 flex flex-col gap-1" style="line-height: 1.5;">
+        <div class="mt-1 flex flex-col gap-1 overflow-y-auto no-scrollbar" style="line-height: 1.5;">
             <div v-for="(conversation, index) in noteConversations"
                  :key="conversation.conversation_id"
                  @click="switchConversation(conversation)"
@@ -319,6 +319,14 @@
         <div v-if="isLoadingConversations" class="mt-1 px-2 py-1 text-xs text-gray-400">loading...</div>
         <div v-if="conversationError" class="mt-1 px-2 py-1 text-xs text-red-500 truncate">{{ conversationError }}</div>
     </div>
+
+    <button v-if="currentNoteId && !showConversationTree"
+            @click.stop="openConversationTree"
+            class="fixed w-10 h-10 rounded-full bg-white/90 backdrop-blur-xl border border-gray-200 shadow-lg text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-center"
+            :style="conversationTreeButtonStyle"
+            title="打开讨论">
+        <i class="fa-regular fa-comment text-xs"></i>
+    </button>
 
     <div v-if="showDocumentOutline"
          ref="outlinePanelRef"
@@ -592,8 +600,15 @@
                 left: '1rem',
                 top: '5.5rem',
                 width: '14.75rem',
+                maxHeight: 'calc(100vh - 8rem)',
                 zIndex: 1000
             });
+            const conversationTreeButtonStyle = ref({
+                left: '1rem',
+                top: '5.5rem',
+                zIndex: 1000
+            });
+            const isConversationTreeCompact = ref(false);
             const documentOutline = ref([]);
             const activeOutlineId = ref('');
             const showDocumentOutline = ref(true);
@@ -1053,21 +1068,47 @@
                 const panelRect = panelRef.value?.getBoundingClientRect?.();
                 const buttonRect = libraryButtonRef.value?.getBoundingClientRect?.();
                 const leftSpace = panelRect ? panelRect.left : window.innerWidth;
+                const hasExternalLeftSpace = leftSpace >= preferredTreeWidth + pagePadding * 2;
+                isConversationTreeCompact.value = !hasExternalLeftSpace;
                 const treeWidth = Math.min(
                     preferredTreeWidth,
-                    Math.max(minTreeWidth, leftSpace - pagePadding * 2)
+                    Math.max(
+                        minTreeWidth,
+                        hasExternalLeftSpace ? leftSpace - pagePadding * 2 : window.innerWidth - pagePadding * 2
+                    )
                 );
                 const centeredLeft = (leftSpace - treeWidth) / 2;
                 const maxLeft = window.innerWidth - treeWidth - pagePadding;
-                const left = Math.max(pagePadding, Math.min(centeredLeft, maxLeft));
+                const treeLeft = hasExternalLeftSpace
+                    ? Math.max(pagePadding, Math.min(centeredLeft, maxLeft))
+                    : pagePadding;
                 const fallbackTop = panelRect ? panelRect.top + 64 : 88;
                 const top = buttonRect ? buttonRect.bottom + 14 : fallbackTop;
+                const bottomLimit = window.innerHeight - 96;
+                const maxHeight = Math.max(160, bottomLimit - top);
                 conversationTreeStyle.value = {
-                    left: `${left}px`,
+                    left: `${treeLeft}px`,
                     top: `${top}px`,
                     width: `${treeWidth}px`,
+                    maxHeight: `${maxHeight}px`,
                     zIndex: 1000
                 };
+                conversationTreeButtonStyle.value = {
+                    left: `${Math.max(pagePadding, Math.min(treeLeft, window.innerWidth - 52))}px`,
+                    top: `${top}px`,
+                    zIndex: 1000
+                };
+            };
+
+            const openConversationTree = async () => {
+                if (!currentNoteId.value) return;
+                if (!noteConversations.value.length) {
+                    await loadNoteConversations().catch(() => {});
+                }
+                updateConversationTreePosition();
+                showConversationTree.value = true;
+                await nextTick();
+                updateConversationTreePosition();
             };
 
             const toggleConversationTree = async () => {
@@ -1076,13 +1117,7 @@
                     closeConversationTree();
                     return;
                 }
-                if (!noteConversations.value.length) {
-                    await loadNoteConversations().catch(() => {});
-                }
-                updateConversationTreePosition();
-                showConversationTree.value = true;
-                await nextTick();
-                updateConversationTreePosition();
+                await openConversationTree();
             };
 
             const createNote = async () => {
@@ -1104,6 +1139,7 @@
                 syncNoteUrl();
                 await nextTick();
                 updateConversationTreePosition();
+                if (isConversationTreeCompact.value) closeConversationTree();
                 return payload;
             };
 
@@ -1135,6 +1171,7 @@
                 showConversationTree.value = true;
                 await nextTick();
                 updateConversationTreePosition();
+                if (isConversationTreeCompact.value) closeConversationTree();
             };
 
             const loadNoteConversations = async () => {
@@ -1960,6 +1997,7 @@
             const toggleFullScreen = async () => {
                 isFullScreen.value = !isFullScreen.value;
                 await nextTick();
+                if (currentNoteId.value) updateConversationTreePosition();
                 updateOutlineLayout();
                 updateActiveOutline();
             };
@@ -1985,7 +2023,7 @@
                 if (newHeight < minHeight) newHeight = minHeight;
                 if (newHeight > maxHeight) newHeight = maxHeight;
                 panelHeight.value = newHeight;
-                if (showConversationTree.value) updateConversationTreePosition();
+                if (currentNoteId.value) updateConversationTreePosition();
                 updateOutlineLayout();
             };
 
@@ -1998,7 +2036,7 @@
             const handleResize = () => {
                 const maxHeight = window.innerHeight - 150;
                 if (panelHeight.value > maxHeight) panelHeight.value = maxHeight;
-                if (showConversationTree.value) updateConversationTreePosition();
+                if (currentNoteId.value) updateConversationTreePosition();
                 adjustInputTextareaHeight();
                 updateOutlineLayout();
                 updateActiveOutline();
@@ -2135,6 +2173,8 @@
                 conversationTreeRef,
                 conversationTreePanelRef,
                 conversationTreeStyle,
+                conversationTreeButtonStyle,
+                isConversationTreeCompact,
                 documentOutline,
                 activeOutlineId,
                 showDocumentOutline,
@@ -2146,6 +2186,7 @@
                 openDocumentOutline,
                 closeDocumentOutline,
                 scrollToOutlineItem,
+                openConversationTree,
                 toggleConversationTree,
                 closeConversationTree,
                 createConversation,

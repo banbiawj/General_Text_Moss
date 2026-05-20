@@ -441,7 +441,7 @@
     <div class="chat-composer fixed left-1/2 w-[95%] max-w-3xl z-50 transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]"
          style="will-change: transform, opacity;"
          :class="isFullScreen ? 'translate-y-[150px] -translate-x-1/2 opacity-0 pointer-events-none' : 'translate-y-0 -translate-x-1/2 opacity-100'">
-        <div data-chat-composer-frame class="chat-composer-frame bg-white shadow-[0_4px_20px_rgb(0,0,0,0.05)] border border-gray-200 p-3 flex flex-col gap-2 transition-all focus-within:border-gray-300">
+        <div data-chat-composer-frame class="chat-composer-frame bg-white shadow-[0_4px_20px_rgb(0,0,0,0.05)] border border-gray-200  p-3 pt-2  flex flex-col  transition-all focus-within:border-gray-300">
             <div data-chat-composer-input-row class="flex w-full">
                 <textarea v-model="inputText"
                           ref="inputTextareaRef"

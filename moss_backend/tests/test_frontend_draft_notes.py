@@ -217,6 +217,7 @@ class FrontendDraftNoteTests(unittest.TestCase):
         self.assertIn("data-header-export-button", index_html)
         self.assertIn("data-header-outline-button", index_html)
         self.assertIn("data-chat-composer-frame", index_html)
+        self.assertIn('data-chat-composer-frame class="chat-composer-frame bg-white shadow-[0_4px_20px_rgb(0,0,0,0.05)] border border-gray-200 px-3 py-2 flex flex-col gap-1', index_html)
         self.assertIn("data-chat-composer-input-row", index_html)
         self.assertIn("data-chat-composer-toolbar", index_html)
         self.assertIn("data-composer-conversation-button", index_html)

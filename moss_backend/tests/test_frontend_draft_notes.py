@@ -197,12 +197,19 @@ class FrontendDraftNoteTests(unittest.TestCase):
     def test_discussion_tree_positions_between_left_edge_and_editor(self) -> None:
         index_html = (self.repo_root() / "index.html").read_text(encoding="utf-8")
 
+        self.assertIn("data-library-header-button", index_html)
+        self.assertNotIn("data-library-external-button", index_html)
+        self.assertIn('data-library-header-button\n                        ref="libraryButtonRef"', index_html)
+        self.assertIn('class="p-2 -ml-2 rounded-lg text-gray-500 hover:bg-white/70 hover:text-gray-800 transition-colors flex items-center justify-center shrink-0"', index_html)
+        self.assertNotIn('class="hidden xl:flex fixed top-[2.125rem]', index_html)
+        self.assertNotIn(":class=\"isFullScreen ? 'flex' : 'flex xl:hidden'\"", index_html)
         self.assertIn('ref="libraryButtonRef"', index_html)
         self.assertIn("const libraryButtonRef = ref(null);", index_html)
         self.assertIn("const preferredTreeWidth = 236;", index_html)
         self.assertIn("const leftSpace = panelRect ? panelRect.left : window.innerWidth;", index_html)
         self.assertIn("const centeredLeft = (leftSpace - treeWidth) / 2;", index_html)
-        self.assertIn("const buttonRect = libraryButtonRef.value?.getBoundingClientRect?.();", index_html)
+        self.assertIn("const rawButtonRect = libraryButtonRef.value?.getBoundingClientRect?.();", index_html)
+        self.assertIn("const buttonRect = rawButtonRect?.width || rawButtonRect?.height ? rawButtonRect : null;", index_html)
         self.assertIn("const top = buttonRect ? buttonRect.bottom + 14 : fallbackTop;", index_html)
         self.assertNotIn("top: '40%'", index_html)
 

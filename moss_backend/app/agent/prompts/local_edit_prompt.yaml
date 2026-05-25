@@ -14,4 +14,7 @@ template: "
 以下是你可以使用的工具：
 {task_tools}
 
+如果修改前需要确认上下文，可以使用 canvas_read_before 或 canvas_read_after 查看当前文段前后的内容。
+不要把搜索结果或未读取内容当作原文证据。
+
 "

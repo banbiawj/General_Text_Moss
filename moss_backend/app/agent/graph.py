@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, AsyncGenerator, Literal
 from uuid import uuid4
@@ -13,6 +14,11 @@ from pydantic import BaseModel, Field
 
 from app.agent.state import AgentState, AgentTask, TaskType
 from app.core.config import get_settings
+from app.services.canvas_context import (
+    context_blocks_from_html,
+    merge_canvas_context_blocks,
+    render_canvas_context,
+)
 from app.services.document_content import tailor_context
 from app.tools.document_tools import DOCUMENT_TOOLS
 
@@ -49,10 +55,50 @@ def _load_prompt_template(filepath: str | Path) -> PromptTemplate:
 # 根据任务类型映射可用的工具列表
 TASK_TYPE_TOOLS: dict[TaskType, list[str]] = {
     "general_chat": [],
-    "document_qa": ["search_document_blocks"],
-    "local_edit": ["search_document_blocks", "update_canvas_element"],
+    "document_qa": ["search_document_blocks", "canvas_read_before", "canvas_read_after"],
+    "local_edit": [
+        "search_document_blocks",
+        "canvas_read_before",
+        "canvas_read_after",
+        "update_canvas_element",
+    ],
     "global_edit": ["update_canvas_element"],
 }
+
+
+STATEFUL_DOCUMENT_TOOL_NAMES = {
+    "search_document_blocks",
+    "canvas_read_before",
+    "canvas_read_after",
+}
+
+
+def _prompt_template_for_task_type(task_type: TaskType) -> PromptTemplate:
+    if task_type == "document_qa":
+        return _load_prompt_template(PROMPTS_DIR / "document_qa_prompt.yaml")
+    if task_type == "local_edit":
+        return _load_prompt_template(PROMPTS_DIR / "local_edit_prompt.yaml")
+    if task_type == "global_edit":
+        return _load_prompt_template(PROMPTS_DIR / "global_edit_prompt.yaml")
+    return _load_prompt_template(PROMPTS_DIR / "general_chat_prompt.yaml")
+
+
+def _format_task_prompt(
+    *,
+    task_type: TaskType,
+    user_input: str,
+    canvas_context: str,
+    focus_element_id: str | None,
+    focus_block_id: str | None,
+    task_tools: list[str],
+) -> str:
+    return _prompt_template_for_task_type(task_type).format(
+        user_input=user_input,
+        canvas_context=canvas_context,
+        focus_element_id=focus_element_id or "",
+        focus_block_id=focus_block_id or "",
+        task_tools=str(task_tools),
+    )
 
 
 # ── Intent Node ──────────────────────────────────────────────────────────
@@ -269,17 +315,27 @@ def task_assemble_node(state: AgentState) -> dict[str, Any]:
 
     tasks: list[AgentTask] = []
     for chunk in context_chunks:
-        task_prompt = prompt.format(
+        canvas_context_blocks = context_blocks_from_html(
+            canvas_snapshot=canvas_snapshot,
+            context_html=chunk,
+            source="initial",
+            added_at=0,
+        )
+        rendered_context = render_canvas_context(canvas_context_blocks) if canvas_context_blocks else chunk
+        task_prompt = _format_task_prompt(
+            task_type=task_type,
             user_input=user_input,
-            canvas_context=chunk,
-            focus_element_id=focus_element_id or "",
-            focus_block_id=focus_block_id or "",
-            task_tools=str(task_tools),
+            canvas_context=rendered_context,
+            focus_element_id=focus_element_id,
+            focus_block_id=focus_block_id,
+            task_tools=task_tools,
         )
         task = AgentTask(
             task_id=uuid4().hex,
             task_message=[],
-            canvas_context=chunk,
+            canvas_context=rendered_context,
+            canvas_context_blocks=canvas_context_blocks,
+            canvas_context_operation_seq=0,
             task_prompt=task_prompt,
             task_tools=task_tools,
             allowed_element_ids=[],
@@ -366,6 +422,55 @@ def execute_node(state: AgentState) -> dict[str, Any]:
 # ── Custom Tools Node ────────────────────────────────────────────────────
 
 
+def _apply_canvas_context_tool_result(
+    *,
+    state: AgentState,
+    task: AgentTask,
+    result_str: str,
+) -> AgentTask:
+    try:
+        payload = json.loads(result_str)
+    except json.JSONDecodeError:
+        return task
+
+    if not isinstance(payload, dict) or payload.get("operation") != "canvas_context_add":
+        return task
+
+    new_blocks = payload.get("blocks")
+    if not isinstance(new_blocks, list) or not new_blocks:
+        return task
+
+    existing_blocks = task.get("canvas_context_blocks", [])
+    if not isinstance(existing_blocks, list):
+        existing_blocks = []
+
+    merged_blocks = merge_canvas_context_blocks(existing_blocks, new_blocks)
+    rendered_context = render_canvas_context(merged_blocks)
+    try:
+        operation_seq = int(task.get("canvas_context_operation_seq", 0)) + 1
+    except (TypeError, ValueError):
+        operation_seq = 1
+    task_tools = list(task.get("task_tools", []))
+    task_type: TaskType = state.get("task_type", "general_chat")
+
+    return AgentTask(
+        **{
+            **task,
+            "canvas_context_blocks": merged_blocks,
+            "canvas_context_operation_seq": operation_seq,
+            "canvas_context": rendered_context,
+            "task_prompt": _format_task_prompt(
+                task_type=task_type,
+                user_input=state.get("user_input", ""),
+                canvas_context=rendered_context,
+                focus_element_id=state.get("focus_element_id"),
+                focus_block_id=state.get("focus_block_id"),
+                task_tools=task_tools,
+            ),
+        }
+    )
+
+
 def tools_node(state: AgentState) -> dict[str, Any]:
     """Execute tool calls for the current task and append results to task_message.
 
@@ -398,8 +503,15 @@ def tools_node(state: AgentState) -> dict[str, Any]:
 
         try:
             args = dict(tool_call["args"])
+            if tool_call["name"] in STATEFUL_DOCUMENT_TOOL_NAMES:
+                args["state"] = state
             result = tool.invoke(args)
             result_str = str(result) if result is not None else ""
+            task = _apply_canvas_context_tool_result(
+                state=state,
+                task=task,
+                result_str=result_str,
+            )
         except Exception as e:
             result_str = f"Tool error: {e}"
 

@@ -11,6 +11,7 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 from pydantic import BaseModel, Field
 
+from app.services.canvas_context import read_neighbor_blocks, resolve_paging_anchor
 from app.services.document_content import _extract_moss_blocks
 
 
@@ -42,6 +43,29 @@ class ParsedHtmlBlock(BaseModel):
 
 
 DOWNLOAD_CACHE: dict[str, dict] = {}
+
+
+def _current_task_from_state(state: dict[str, Any]) -> dict[str, Any]:
+    tasks = state.get("tasks") or []
+    current_index = state.get("current_task_index", 0)
+    if not isinstance(tasks, list):
+        return {}
+    try:
+        index = int(current_index)
+    except (TypeError, ValueError):
+        index = 0
+    if index < 0 or index >= len(tasks):
+        return {}
+    task = tasks[index]
+    return task if isinstance(task, dict) else {}
+
+
+def _next_context_operation_seq(task: dict[str, Any]) -> int:
+    current = task.get("canvas_context_operation_seq", 0)
+    try:
+        return int(current) + 1
+    except (TypeError, ValueError):
+        return 1
 
 
 @tool
@@ -143,6 +167,72 @@ def search_document_blocks(
     )
 
 
+@tool
+def canvas_read_before(
+    anchor_block_id: Annotated[
+        str | None,
+        "Optional moss-block id to read before. If omitted, use the earliest block in current canvas_context, then focus_block_id.",
+    ] = None,
+    block_count: Annotated[
+        int,
+        "Number of previous canvas blocks to read. Values are clamped to 1..8.",
+    ] = 3,
+    state: Annotated[dict[str, Any], InjectedState] = None,
+) -> str:
+    """Read blocks before an anchor from canvas_snapshot and return a structured context delta."""
+
+    state = state or {}
+    task = _current_task_from_state(state)
+    context_blocks = task.get("canvas_context_blocks") or []
+    anchor = resolve_paging_anchor(
+        direction="before",
+        explicit_anchor_block_id=anchor_block_id,
+        context_blocks=context_blocks if isinstance(context_blocks, list) else [],
+        focus_block_id=state.get("focus_block_id"),
+    )
+    result = read_neighbor_blocks(
+        canvas_snapshot=str(state.get("canvas_snapshot") or ""),
+        anchor_block_id=anchor,
+        direction="before",
+        block_count=block_count,
+        added_at=_next_context_operation_seq(task),
+    )
+    return _json_result(result)
+
+
+@tool
+def canvas_read_after(
+    anchor_block_id: Annotated[
+        str | None,
+        "Optional moss-block id to read after. If omitted, use the latest block in current canvas_context, then focus_block_id.",
+    ] = None,
+    block_count: Annotated[
+        int,
+        "Number of following canvas blocks to read. Values are clamped to 1..8.",
+    ] = 3,
+    state: Annotated[dict[str, Any], InjectedState] = None,
+) -> str:
+    """Read blocks after an anchor from canvas_snapshot and return a structured context delta."""
+
+    state = state or {}
+    task = _current_task_from_state(state)
+    context_blocks = task.get("canvas_context_blocks") or []
+    anchor = resolve_paging_anchor(
+        direction="after",
+        explicit_anchor_block_id=anchor_block_id,
+        context_blocks=context_blocks if isinstance(context_blocks, list) else [],
+        focus_block_id=state.get("focus_block_id"),
+    )
+    result = read_neighbor_blocks(
+        canvas_snapshot=str(state.get("canvas_snapshot") or ""),
+        anchor_block_id=anchor,
+        direction="after",
+        block_count=block_count,
+        added_at=_next_context_operation_seq(task),
+    )
+    return _json_result(result)
+
+
 @tool(args_schema=CanvasMutationArgs)
 def update_canvas_element(element_id: str, action_type: str, new_html: str = "") -> str:
     """Dispatch a structured document mutation to the browser canvas."""
@@ -166,7 +256,13 @@ def generate_download_link(export_format: str, content: str = "") -> str:
     return f"/api/v1/download/{token}"
 
 
-DOCUMENT_TOOLS = [search_document_blocks, update_canvas_element, generate_download_link]
+DOCUMENT_TOOLS = [
+    search_document_blocks,
+    canvas_read_before,
+    canvas_read_after,
+    update_canvas_element,
+    generate_download_link,
+]
 
 
 def _parse_snapshot_blocks(canvas_snapshot: str) -> list[ParsedHtmlBlock]:

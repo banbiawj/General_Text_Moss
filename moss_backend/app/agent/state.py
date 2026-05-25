@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import operator
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import BaseMessage
 
@@ -27,6 +27,8 @@ class AgentTask(TypedDict, total=False):
     # 本任务允许进入大模型 prompt 的裁剪上下文。
     # 注意：不是完整 canvas_snapshot。
     canvas_context: str
+    canvas_context_blocks: list[dict[str, Any]]
+    canvas_context_operation_seq: int
 
     # 基于任务意图生成的任务提示词。
     # 例如：局部润色、文档问答、全文第 N 段整理等。

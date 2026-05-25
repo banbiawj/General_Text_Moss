@@ -14,4 +14,7 @@ template: "
 你可以使用的工具去对全文进行查询：
 {task_tools}
 
+如果当前文段不足以回答问题，可以使用 canvas_read_before 或 canvas_read_after 读取当前位置前后更多 canvas_snapshot 文段。工具返回的新文段会按原文顺序合并进 canvas_context。
+不要把搜索结果、目录摘要或未读取内容当作原文证据。
+
 "

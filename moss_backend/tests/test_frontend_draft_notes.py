@@ -170,11 +170,12 @@ class FrontendDraftNoteTests(unittest.TestCase):
     def test_discussion_menu_uses_modern_rows_instead_of_ascii_tree(self) -> None:
         index_html = (self.repo_root() / "index.html").read_text(encoding="utf-8")
 
+        self.assertIn("conversationStatusIcon(conversation)", index_html)
         self.assertIn("fa-regular fa-message text-[11px] shrink-0", index_html)
+        self.assertIn("fa-solid fa-message text-[11px] shrink-0", index_html)
         self.assertIn("{{ conversationTitle(conversation) }}", index_html)
-        self.assertIn('v-if="isCurrentConversation(conversation)"', index_html)
-        self.assertIn('class="rounded-full bg-black shrink-0"', index_html)
-        self.assertIn('style="width: 0.375rem; height: 0.375rem;"', index_html)
+        self.assertNotIn("conversation-current-marker-slot", index_html)
+        self.assertNotIn('class="rounded-full bg-black shrink-0"', index_html)
         self.assertIn("group w-full flex items-center justify-between px-2 py-1.5 text-sm", index_html)
         self.assertNotIn("const conversationTreeLine = (conversation, index) =>", index_html)
         self.assertNotIn("const conversationTreePrefix = (index) =>", index_html)
@@ -182,18 +183,21 @@ class FrontendDraftNoteTests(unittest.TestCase):
         self.assertNotIn("{{ conversationTreeLine(conversation, index) }}", index_html)
         self.assertNotIn("grid-cols-[", index_html)
 
-    def test_discussion_rows_keep_current_marker_separate_from_action_menu(self) -> None:
+    def test_discussion_rows_use_message_icon_state_instead_of_marker_slot(self) -> None:
         index_html = (self.repo_root() / "index.html").read_text(encoding="utf-8")
 
         self.assertIn("conversation-action-slot", index_html)
-        self.assertIn("conversation-current-marker-slot", index_html)
+        self.assertNotIn("conversation-current-marker-slot", index_html)
         self.assertIn("conversationActionIcon(conversation)", index_html)
+        self.assertIn("conversationStatusIcon(conversation)", index_html)
+        self.assertIn("const conversationStatusIcon = (conversation = {}) =>", index_html)
+        self.assertIn("isCurrentConversation(conversation) ? 'fa-solid fa-message text-[11px] shrink-0' : 'fa-regular fa-message text-[11px] shrink-0'", index_html)
         self.assertIn("openConversationMenuId === conversation.conversation_id", index_html)
         self.assertIn("@click.stop=\"toggleConversationMenu(conversation, $event)\"", index_html)
         self.assertIn("fa-solid fa-ellipsis", index_html)
         self.assertIn("fa-solid fa-thumbtack", index_html)
-        self.assertIn("v-if=\"isCurrentConversation(conversation)\"", index_html)
-        self.assertIn("class=\"rounded-full bg-black shrink-0\"", index_html)
+        self.assertNotIn("v-if=\"isCurrentConversation(conversation)\"", index_html)
+        self.assertNotIn("class=\"rounded-full bg-black shrink-0\"", index_html)
 
     def test_discussion_action_menu_uses_blueprint_dropdown_treatment(self) -> None:
         index_html = (self.repo_root() / "index.html").read_text(encoding="utf-8")

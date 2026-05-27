@@ -337,7 +337,7 @@
                 <div v-if="editingConversationId === conversation.conversation_id"
                      class="flex items-center gap-1.5 overflow-hidden min-w-0 flex-1"
                      @click.stop>
-                    <i class="fa-regular fa-message text-[11px] text-gray-500 shrink-0"></i>
+                    <i :class="[conversationStatusIcon(conversation), isCurrentConversation(conversation) ? 'text-gray-700' : 'text-gray-500']"></i>
                     <input v-model="renameConversationDraft"
                            @keydown.enter.prevent="saveConversationTitle(conversation)"
                            @keydown.esc.prevent="cancelRenameConversation"
@@ -362,8 +362,7 @@
                 </div>
                 <template v-else>
                     <div class="flex items-center gap-2 overflow-hidden min-w-0 flex-1">
-                        <i class="fa-regular fa-message text-[11px] shrink-0"
-                           :class="isCurrentConversation(conversation) ? 'text-gray-700' : 'text-gray-400'"></i>
+                        <i :class="[conversationStatusIcon(conversation), isCurrentConversation(conversation) ? 'text-gray-700' : 'text-gray-400']"></i>
                         <span class="truncate">{{ conversationTitle(conversation) }}</span>
                     </div>
                     <div class="flex items-center gap-1.5 shrink-0">
@@ -406,11 +405,6 @@
                                     </button>
                                 </div>
                             </teleport>
-                        </div>
-                        <div class="conversation-current-marker-slot w-2 shrink-0 flex items-center justify-center">
-                            <span v-if="isCurrentConversation(conversation)"
-                                  class="rounded-full bg-black shrink-0"
-                                  style="width: 0.375rem; height: 0.375rem;"></span>
                         </div>
                     </div>
                 </template>
@@ -1183,6 +1177,10 @@
 
             const isCurrentConversation = (conversation = {}) => {
                 return conversation.conversation_id === currentConversationId.value;
+            };
+
+            const conversationStatusIcon = (conversation = {}) => {
+                return isCurrentConversation(conversation) ? 'fa-solid fa-message text-[11px] shrink-0' : 'fa-regular fa-message text-[11px] shrink-0';
             };
 
             const isConversationMenuOpen = (conversation = {}) => {
@@ -2481,6 +2479,7 @@
                 conversationTitle,
                 currentConversationTitle,
                 isCurrentConversation,
+                conversationStatusIcon,
                 conversationActionIcon,
                 handleConversationRowLeave,
                 toggleConversationMenu,

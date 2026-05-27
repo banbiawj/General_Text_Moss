@@ -16,6 +16,7 @@ from app.api.schemas import (
     CreateNoteConversationResponse,
     ConversationMessagesResponse,
     CreateNoteResponse,
+    DeleteNoteConversationResponse,
     DeleteNoteResponse,
     DocumentUploadResponse,
     ExportDocumentRequest,
@@ -57,6 +58,7 @@ def _note_conversation_response(conversation) -> NoteConversationResponse:
         note_id=conversation.note_id,
         title=conversation.title,
         is_default=conversation.is_default,
+        pinned_at=conversation.pinned_at,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
     )
@@ -255,11 +257,14 @@ async def update_note_conversation(
     payload: UpdateNoteConversationRequest,
 ) -> NoteConversationResponse:
     try:
-        conversation = get_note_store().rename_conversation(
+        title = payload.title if "title" in payload.model_fields_set else _UNSET
+        pinned = payload.pinned if "pinned" in payload.model_fields_set else _UNSET
+        conversation = get_note_store().update_conversation(
             DEFAULT_USER_ID,
             note_id,
             conversation_id,
-            payload.title,
+            title=title,
+            pinned=pinned,
         )
     except (InvalidConversationId, InvalidNoteId, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -268,6 +273,34 @@ async def update_note_conversation(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     return _note_conversation_response(conversation)
+
+
+@api_router.delete(
+    "/notes/{note_id}/conversations/{conversation_id}",
+    response_model=DeleteNoteConversationResponse,
+)
+async def delete_note_conversation(
+    note_id: str,
+    conversation_id: str,
+) -> DeleteNoteConversationResponse:
+    try:
+        deleted = get_note_store().delete_conversation(
+            DEFAULT_USER_ID,
+            note_id,
+            conversation_id,
+        )
+    except (InvalidConversationId, InvalidNoteId) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return DeleteNoteConversationResponse(
+        conversation_id=deleted.conversation_id,
+        deleted_at=deleted.deleted_at,
+    )
 
 
 @api_router.get(

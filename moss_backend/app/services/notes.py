@@ -119,6 +119,12 @@ class DeletedNote:
     deleted_at: str
 
 
+@dataclass(frozen=True)
+class DeletedConversation:
+    conversation_id: str
+    deleted_at: str
+
+
 def generate_note_id() -> str:
     return f"note-{uuid4().hex}"
 
@@ -483,6 +489,8 @@ class NoteStore:
             raise PermissionError("conversation_id is owned by a different user")
         if conversation.note_id != note_id:
             raise ValueError("conversation does not belong to note")
+        if conversation.deleted_at is not None:
+            raise KeyError(f"conversation not found: {conversation_id}")
         return conversation
 
     def list_note_conversations(
@@ -498,8 +506,12 @@ class NoteStore:
                 """
                 SELECT *
                 FROM conversations
-                WHERE user_id = ? AND note_id = ?
-                ORDER BY is_default DESC, updated_at DESC
+                WHERE user_id = ? AND note_id = ? AND deleted_at IS NULL
+                ORDER BY
+                    pinned_at IS NULL ASC,
+                    pinned_at DESC,
+                    is_default DESC,
+                    updated_at DESC
                 """,
                 (user_id, note_id),
             ).fetchall()
@@ -579,28 +591,99 @@ class NoteStore:
         conversation_id: str,
         title: str,
     ) -> ConversationRecord:
+        return self.update_conversation(
+            user_id,
+            note_id,
+            conversation_id,
+            title=title,
+        )
+
+    def update_conversation(
+        self,
+        user_id: str,
+        note_id: str,
+        conversation_id: str,
+        *,
+        title: object = _UNSET,
+        pinned: object = _UNSET,
+    ) -> ConversationRecord:
         conversation = self.verify_conversation_for_note(
             user_id,
             note_id,
             conversation_id,
         )
-        next_title = normalize_conversation_title(title)
+        next_title = conversation.title
+        if title is not _UNSET:
+            next_title = normalize_conversation_title(str(title))
+
+        next_pinned_at = conversation.pinned_at
+        if pinned is not _UNSET:
+            next_pinned_at = utc_now_iso() if bool(pinned) else None
+
         now = utc_now_iso()
         with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE conversations
-                SET title = ?, updated_at = ?
+                SET title = ?, pinned_at = ?, updated_at = ?
                 WHERE conversation_id = ?
                 """,
-                (next_title, now, conversation.conversation_id),
+                (next_title, next_pinned_at, now, conversation.conversation_id),
             )
             conn.commit()
 
-        renamed = self.get_conversation(conversation.conversation_id)
-        if renamed is None:
+        updated = self.get_conversation(conversation.conversation_id)
+        if updated is None or updated.deleted_at is not None:
             raise KeyError(f"conversation not found: {conversation.conversation_id}")
-        return renamed
+        return updated
+
+    def delete_conversation(
+        self,
+        user_id: str,
+        note_id: str,
+        conversation_id: str,
+    ) -> DeletedConversation:
+        self._validate_note_id(note_id)
+        note = self._get_note_record(user_id, note_id)
+        if note is None:
+            raise KeyError(f"note not found: {note_id}")
+
+        conversation = self.get_conversation(conversation_id)
+        if conversation is None:
+            raise KeyError(f"conversation not found: {conversation_id}")
+        if conversation.user_id != user_id:
+            raise PermissionError("conversation_id is owned by a different user")
+        if conversation.note_id != note_id:
+            raise ValueError("conversation does not belong to note")
+        if conversation.is_default:
+            raise ValueError("default conversation cannot be deleted")
+
+        deleted_at = conversation.deleted_at or utc_now_iso()
+        default_conversation = self._get_default_conversation(note_id)
+        if default_conversation is None:
+            raise KeyError(f"default conversation not found for note: {note_id}")
+
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE conversations
+                SET deleted_at = ?, pinned_at = NULL
+                WHERE conversation_id = ?
+                """,
+                (deleted_at, conversation_id),
+            )
+            if note.last_opened_conversation_id == conversation_id:
+                conn.execute(
+                    """
+                    UPDATE notes
+                    SET last_opened_conversation_id = ?
+                    WHERE user_id = ? AND note_id = ? AND deleted_at IS NULL
+                    """,
+                    (default_conversation.conversation_id, user_id, note_id),
+                )
+            conn.commit()
+
+        return DeletedConversation(conversation_id=conversation_id, deleted_at=deleted_at)
 
     def touch_conversation(
         self,
@@ -661,7 +744,9 @@ class NoteStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     note_id TEXT,
-                    is_default INTEGER NOT NULL DEFAULT 0
+                    is_default INTEGER NOT NULL DEFAULT 0,
+                    pinned_at TEXT,
+                    deleted_at TEXT
                 )
                 """
             )
@@ -695,6 +780,10 @@ class NoteStore:
                 ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0
                 """
             )
+        if "pinned_at" not in columns:
+            conn.execute("ALTER TABLE conversations ADD COLUMN pinned_at TEXT")
+        if "deleted_at" not in columns:
+            conn.execute("ALTER TABLE conversations ADD COLUMN deleted_at TEXT")
 
     def _ensure_note_columns(self, conn: sqlite3.Connection) -> None:
         columns = self._table_columns(conn, "notes")
@@ -844,6 +933,7 @@ class NoteStore:
                 conversation is not None
                 and conversation.user_id == note.user_id
                 and conversation.note_id == note.note_id
+                and conversation.deleted_at is None
             ):
                 return conversation.conversation_id
         return default_conversation_id
@@ -866,7 +956,7 @@ class NoteStore:
                 """
                 SELECT *
                 FROM conversations
-                WHERE note_id = ? AND is_default = 1
+                WHERE note_id = ? AND is_default = 1 AND deleted_at IS NULL
                 """,
                 (note_id,),
             ).fetchone()
@@ -929,6 +1019,7 @@ class NoteStore:
         )
 
     def _conversation_from_row(self, row: sqlite3.Row) -> ConversationRecord:
+        columns = set(row.keys())
         return ConversationRecord(
             conversation_id=str(row["conversation_id"]),
             user_id=str(row["user_id"]),
@@ -937,6 +1028,12 @@ class NoteStore:
             updated_at=str(row["updated_at"]),
             note_id=None if row["note_id"] is None else str(row["note_id"]),
             is_default=bool(row["is_default"]),
+            pinned_at=None
+            if "pinned_at" not in columns or row["pinned_at"] is None
+            else str(row["pinned_at"]),
+            deleted_at=None
+            if "deleted_at" not in columns or row["deleted_at"] is None
+            else str(row["deleted_at"]),
         )
 
     def _table_columns(self, conn: sqlite3.Connection, table_name: str) -> set[str]:

@@ -238,6 +238,92 @@ class NotesApiTests(unittest.TestCase):
         )
         self.assertIn("Structure rewrite", [item.title for item in conversations])
 
+    def test_patch_note_conversation_toggles_pin(self) -> None:
+        created = self.store.create_note(DEFAULT_USER_ID)
+        discussion = self.store.create_conversation_for_note(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+        )
+
+        response = self.request(
+            "PATCH",
+            (
+                f"/api/v1/notes/{created.note.note_id}/conversations/"
+                f"{discussion.conversation_id}"
+            ),
+            json={"pinned": True},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["conversation_id"], discussion.conversation_id)
+        self.assertIsNotNone(payload["pinned_at"])
+        list_response = self.request(
+            "GET",
+            f"/api/v1/notes/{created.note.note_id}/conversations",
+        )
+        conversations = list_response.json()["conversations"]
+        self.assertEqual(conversations[0]["conversation_id"], discussion.conversation_id)
+        self.assertIsNotNone(conversations[0]["pinned_at"])
+
+        unpin_response = self.request(
+            "PATCH",
+            (
+                f"/api/v1/notes/{created.note.note_id}/conversations/"
+                f"{discussion.conversation_id}"
+            ),
+            json={"pinned": False},
+        )
+
+        self.assertEqual(unpin_response.status_code, 200, unpin_response.text)
+        self.assertIsNone(unpin_response.json()["pinned_at"])
+
+    def test_delete_note_conversation_hides_it_and_keeps_default(self) -> None:
+        created = self.store.create_note(DEFAULT_USER_ID)
+        discussion = self.store.create_conversation_for_note(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+        )
+
+        response = self.request(
+            "DELETE",
+            (
+                f"/api/v1/notes/{created.note.note_id}/conversations/"
+                f"{discussion.conversation_id}"
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["conversation_id"], discussion.conversation_id)
+        self.assertIsNotNone(response.json()["deleted_at"])
+        list_response = self.request(
+            "GET",
+            f"/api/v1/notes/{created.note.note_id}/conversations",
+        )
+        conversations = list_response.json()["conversations"]
+        self.assertEqual(
+            [item["conversation_id"] for item in conversations],
+            [created.default_conversation.conversation_id],
+        )
+        loaded = self.store.get_note(DEFAULT_USER_ID, created.note.note_id)
+        self.assertEqual(
+            loaded.active_conversation_id,
+            created.default_conversation.conversation_id,
+        )
+
+    def test_delete_default_note_conversation_returns_conflict(self) -> None:
+        created = self.store.create_note(DEFAULT_USER_ID)
+
+        response = self.request(
+            "DELETE",
+            (
+                f"/api/v1/notes/{created.note.note_id}/conversations/"
+                f"{created.default_conversation.conversation_id}"
+            ),
+        )
+
+        self.assertEqual(response.status_code, 409)
+
     def test_get_conversation_messages_marks_discussion_active(self) -> None:
         created = self.store.create_note(DEFAULT_USER_ID)
         discussion = self.store.create_conversation_for_note(

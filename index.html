@@ -104,6 +104,78 @@
         }
         .animate-pop-in { animation: popIn 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 
+        .conversation-dropdown-menu {
+            position: fixed;
+            width: 10.5rem;
+            background: rgba(255, 255, 255, 0.96);
+            border: 1px solid rgba(229, 229, 229, 0.85);
+            border-radius: 8px;
+            box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.72), 0 4px 12px -2px rgba(0, 0, 0, 0.12), 0 12px 32px -4px rgba(0, 0, 0, 0.12);
+            padding: 6px 0;
+            z-index: 1100;
+            user-select: none;
+            opacity: 0;
+            visibility: hidden;
+            transform: scale(0.97) translateY(-4px);
+            transform-origin: top left;
+            transition: opacity 0.15s cubic-bezier(0.2, 0, 0.2, 1), transform 0.15s cubic-bezier(0.2, 0, 0.2, 1), visibility 0.15s;
+        }
+        .conversation-dropdown-menu.show {
+            opacity: 1;
+            visibility: visible;
+            transform: scale(1) translateY(0);
+        }
+        .conversation-menu-item {
+            align-items: center;
+            border: 1px solid transparent;
+            border-radius: 5px;
+            color: #404040;
+            cursor: pointer;
+            display: flex;
+            font-size: 13px;
+            gap: 8px;
+            margin: 1px 6px;
+            padding: 5px 8px;
+            transition: background-color 0.1s ease, border-color 0.1s ease, transform 0.05s ease;
+            width: calc(100% - 12px);
+        }
+        .conversation-menu-item:hover {
+            background: rgba(245, 245, 245, 0.95);
+            border-color: rgba(229, 229, 229, 0.95);
+        }
+        .conversation-menu-item:active {
+            transform: scale(0.98);
+        }
+        .conversation-menu-item:disabled {
+            color: #a3a3a3;
+            cursor: not-allowed;
+            opacity: 0.65;
+            transform: none;
+        }
+        .conversation-menu-item.danger {
+            color: #dc2626;
+        }
+        .conversation-menu-item.danger:hover:not(:disabled) {
+            background: #fef2f2;
+            border-color: #fee2e2;
+        }
+        .conversation-menu-icon {
+            align-items: center;
+            display: flex;
+            height: 18px;
+            justify-content: center;
+            width: 18px;
+            flex-shrink: 0;
+        }
+        .conversation-menu-divider {
+            background: rgba(229, 229, 229, 0.85);
+            height: 1px;
+            margin: 4px 0;
+        }
+        .conversation-delete-dialog-overlay {
+            z-index: 1200;
+        }
+
         .resizing { user-select: none; -webkit-user-select: none; cursor: ns-resize !important; }
     </style>
 </head>
@@ -229,7 +301,7 @@
 
     <div v-if="showConversationTree && currentNoteId"
          ref="conversationTreePanelRef"
-         class="fixed bg-white/80 backdrop-blur-xl border border-gray-100 rounded-xl text-gray-800 flex flex-col gap-1 overflow-hidden animate-pop-in"
+         class="fixed bg-white/80 backdrop-blur-xl border border-gray-100 rounded-xl text-gray-800 flex flex-col gap-1 overflow-visible animate-pop-in"
          style="box-shadow: 0 8px 30px rgb(0 0 0 / 0.08); padding: 0.375rem;"
          :style="conversationTreeStyle"
          @click.stop>
@@ -250,13 +322,15 @@
             </div>
         </div>
 
-        <div class="mt-1 flex flex-col gap-1 overflow-y-auto no-scrollbar" style="line-height: 1.5;">
+        <div class="mt-1 flex flex-col gap-1 overflow-y-auto no-scrollbar" style="line-height: 1.5;" @scroll.passive="closeConversationMenu">
             <div v-for="(conversation, index) in noteConversations"
                  :key="conversation.conversation_id"
                  @click="switchConversation(conversation)"
-                 class="group w-full flex items-center justify-between px-2 py-1.5 text-sm transition-all rounded-lg text-left"
+                 @mouseenter="hoveredConversationId = conversation.conversation_id"
+                 @mouseleave="handleConversationRowLeave(conversation)"
+                 class="group w-full flex items-center justify-between px-2 py-1.5 text-sm transition-all rounded-lg text-left relative"
                  :class="[
-                    isCurrentConversation(conversation) ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800',
+                    (isCurrentConversation(conversation) || openConversationMenuId === conversation.conversation_id) ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800',
                     isModifying ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
                  ]"
                  :title="conversationTitle(conversation)">
@@ -287,21 +361,57 @@
                     </button>
                 </div>
                 <template v-else>
-                    <div class="flex items-center gap-2 overflow-hidden min-w-0">
+                    <div class="flex items-center gap-2 overflow-hidden min-w-0 flex-1">
                         <i class="fa-regular fa-message text-[11px] shrink-0"
                            :class="isCurrentConversation(conversation) ? 'text-gray-700' : 'text-gray-400'"></i>
                         <span class="truncate">{{ conversationTitle(conversation) }}</span>
                     </div>
                     <div class="flex items-center gap-1.5 shrink-0">
-                        <button @click.stop="startRenameConversation(conversation)"
-                                :disabled="isModifying"
-                                class="h-6 w-6 rounded-full text-gray-300 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-gray-100 hover:text-gray-800 transition-all flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
-                                title="重命名讨论">
-                            <i class="fa-regular fa-pen-to-square text-[11px]"></i>
-                        </button>
-                        <span v-if="isCurrentConversation(conversation)"
-                              class="rounded-full bg-black shrink-0"
-                              style="width: 0.375rem; height: 0.375rem;"></span>
+                        <div class="conversation-action-slot relative h-6 w-6 shrink-0 flex items-center justify-center">
+                            <button v-if="conversationActionIcon(conversation)"
+                                    @click.stop="toggleConversationMenu(conversation, $event)"
+                                    :data-conversation-menu-trigger="conversation.conversation_id"
+                                    :disabled="isModifying || isConversationActionBusy"
+                                    class="h-6 w-6 rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-800 transition-all flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
+                                    title="更多">
+                                <i :class="conversationActionIcon(conversation)" class="text-[11px]"></i>
+                            </button>
+                            <teleport to="body">
+                                <div v-if="openConversationMenuId === conversation.conversation_id"
+                                     class="conversation-dropdown-menu show"
+                                     :style="conversationMenuStyle"
+                                     @pointerdown.stop
+                                     @click.stop>
+                                    <button @click.stop="startRenameConversation(conversation)"
+                                            :disabled="isModifying || isConversationActionBusy"
+                                            class="conversation-menu-item"
+                                            type="button">
+                                        <span class="conversation-menu-icon"><i class="fa-regular fa-pen-to-square text-[12px]"></i></span>
+                                        <span>重命名</span>
+                                    </button>
+                                    <button @click.stop="toggleConversationPinned(conversation)"
+                                            :disabled="isModifying || isConversationActionBusy"
+                                            class="conversation-menu-item"
+                                            type="button">
+                                        <span class="conversation-menu-icon"><i class="fa-solid fa-thumbtack text-[12px]"></i></span>
+                                        <span>{{ conversation.pinned_at ? '取消置顶' : '置顶' }}</span>
+                                    </button>
+                                    <div class="conversation-menu-divider"></div>
+                                    <button @click.stop="startDeleteConversation(conversation)"
+                                            :disabled="conversation.is_default || isModifying || isConversationActionBusy"
+                                            class="conversation-menu-item danger"
+                                            type="button">
+                                        <span class="conversation-menu-icon"><i class="fa-regular fa-trash-can text-[12px]"></i></span>
+                                        <span>删除</span>
+                                    </button>
+                                </div>
+                            </teleport>
+                        </div>
+                        <div class="conversation-current-marker-slot w-2 shrink-0 flex items-center justify-center">
+                            <span v-if="isCurrentConversation(conversation)"
+                                  class="rounded-full bg-black shrink-0"
+                                  style="width: 0.375rem; height: 0.375rem;"></span>
+                        </div>
                     </div>
                 </template>
             </div>
@@ -313,6 +423,25 @@
 
         <div v-if="isLoadingConversations" class="mt-1 px-2 py-1 text-xs text-gray-400">loading...</div>
         <div v-if="conversationError" class="mt-1 px-2 py-1 text-xs text-red-500 truncate">{{ conversationError }}</div>
+    </div>
+
+    <div v-if="deleteConversationTarget"
+         class="conversation-delete-dialog-overlay fixed inset-0 flex items-center justify-center bg-black/20 px-4"
+         @click.self="cancelDeleteConversation">
+        <div class="w-full max-w-sm rounded-lg bg-white border border-gray-100 shadow-xl p-4" @click.stop>
+            <div class="text-sm font-semibold text-gray-900">删除会话</div>
+            <p class="mt-2 text-sm text-gray-600 leading-relaxed break-words">
+                “{{ conversationTitle(deleteConversationTarget) }}” 将从当前笔记的会话列表中移除。删除后该会话消息不可再访问。
+            </p>
+            <div class="mt-4 flex justify-end gap-2">
+                <button @click="cancelDeleteConversation"
+                        :disabled="isConversationActionBusy"
+                        class="px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-60 disabled:cursor-not-allowed">取消</button>
+                <button @click="confirmDeleteConversation"
+                        :disabled="isConversationActionBusy"
+                        class="px-3 py-2 rounded-lg text-sm bg-red-600 text-white hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed">删除</button>
+            </div>
+        </div>
     </div>
 
     <div v-if="showDocumentOutline"
@@ -586,9 +715,18 @@
             const isLoadingConversations = ref(false);
             const isCreatingConversation = ref(false);
             const isRenamingConversation = ref(false);
+            const isConversationActionBusy = ref(false);
             const editingConversationId = ref('');
             const renameConversationDraft = ref('');
             const conversationError = ref('');
+            const hoveredConversationId = ref('');
+            const openConversationMenuId = ref('');
+            const deleteConversationTarget = ref(null);
+            const conversationMenuStyle = ref({
+                left: '-9999px',
+                top: '-9999px',
+                width: '10.5rem'
+            });
             const showConversationTree = ref(true);
             const conversationTreeStyle = ref({
                 left: '1rem',
@@ -1029,6 +1167,7 @@
                 note_id: conversation.note_id || currentNoteId.value,
                 title: conversation.title || '',
                 is_default: Boolean(conversation.is_default),
+                pinned_at: conversation.pinned_at || null,
                 created_at: conversation.created_at || '',
                 updated_at: conversation.updated_at || ''
             });
@@ -1046,7 +1185,69 @@
                 return conversation.conversation_id === currentConversationId.value;
             };
 
+            const isConversationMenuOpen = (conversation = {}) => {
+                return Boolean(conversation.conversation_id && openConversationMenuId.value === conversation.conversation_id);
+            };
+
+            const conversationActionIcon = (conversation = {}) => {
+                if (!conversation.conversation_id) return '';
+                if (isConversationMenuOpen(conversation) || hoveredConversationId.value === conversation.conversation_id) {
+                    return 'fa-solid fa-ellipsis';
+                }
+                if (conversation.pinned_at) return 'fa-solid fa-thumbtack';
+                if (isCurrentConversation(conversation)) return 'fa-solid fa-ellipsis';
+                return '';
+            };
+
+            const closeConversationMenu = () => {
+                openConversationMenuId.value = '';
+            };
+
+            const handleConversationRowLeave = (conversation = {}) => {
+                if (!isConversationMenuOpen(conversation)) {
+                    hoveredConversationId.value = '';
+                }
+            };
+
+            const conversationMenuTrigger = (conversation = {}) => {
+                const id = conversation.conversation_id || '';
+                const triggers = conversationTreePanelRef.value?.querySelectorAll?.('[data-conversation-menu-trigger]') || [];
+                return Array.from(triggers).find(trigger => trigger.dataset.conversationMenuTrigger === id) || null;
+            };
+
+            const updateConversationMenuPosition = (conversation = {}, triggerElement = null) => {
+                const trigger = triggerElement || conversationMenuTrigger(conversation);
+                const rect = trigger?.getBoundingClientRect?.();
+                if (!rect) return;
+                const menuWidth = 168;
+                const menuHeight = 118;
+                const pagePadding = 8;
+                const maxLeft = Math.max(pagePadding, window.innerWidth - menuWidth - pagePadding);
+                const maxTop = Math.max(pagePadding, window.innerHeight - menuHeight - pagePadding);
+                const desiredLeft = rect.left;
+                const desiredTop = rect.bottom + 6;
+                const left = Math.max(pagePadding, Math.min(desiredLeft, maxLeft));
+                const top = Math.max(pagePadding, Math.min(desiredTop, maxTop));
+                conversationMenuStyle.value = {
+                    left: `${left}px`,
+                    top: `${top}px`,
+                    width: `${menuWidth}px`
+                };
+            };
+
+            const toggleConversationMenu = (conversation = {}, event = null) => {
+                if (!conversation.conversation_id || isModifying.value) return;
+                if (isConversationMenuOpen(conversation)) {
+                    closeConversationMenu();
+                    return;
+                }
+                updateConversationMenuPosition(conversation, event?.currentTarget || null);
+                hoveredConversationId.value = conversation.conversation_id;
+                openConversationMenuId.value = conversation.conversation_id;
+            };
+
             const closeConversationTree = () => {
+                closeConversationMenu();
                 showConversationTree.value = false;
             };
 
@@ -1171,6 +1372,12 @@
                     if (!response.ok) throw new Error(await response.text());
                     const payload = await response.json();
                     noteConversations.value = (payload.conversations || []).map(normalizeConversation);
+                    if (
+                        openConversationMenuId.value &&
+                        !noteConversations.value.some(item => item.conversation_id === openConversationMenuId.value)
+                    ) {
+                        closeConversationMenu();
+                    }
                     if (!currentConversationId.value && payload.active_conversation_id) {
                         setCurrentConversationId(payload.active_conversation_id);
                         syncNoteUrl();
@@ -1198,6 +1405,7 @@
 
             const createConversation = async () => {
                 if (isCreatingConversation.value) return;
+                closeConversationMenu();
                 isCreatingConversation.value = true;
                 conversationError.value = '';
                 try {
@@ -1234,6 +1442,7 @@
                     editingConversationId.value
                 ) return;
                 const previousConversationId = currentConversationId.value;
+                closeConversationMenu();
                 conversationError.value = '';
                 try {
                     await flushAutosave();
@@ -1253,6 +1462,7 @@
 
             const startRenameConversation = (conversation) => {
                 if (isModifying.value || isRenamingConversation.value) return;
+                closeConversationMenu();
                 editingConversationId.value = conversation?.conversation_id || '';
                 renameConversationDraft.value = conversationTitle(conversation);
                 nextTick(() => {
@@ -1302,6 +1512,73 @@
                     conversationError.value = error.message || 'Failed to rename discussion';
                 } finally {
                     isRenamingConversation.value = false;
+                }
+            };
+
+            const toggleConversationPinned = async (conversation) => {
+                if (!conversation?.conversation_id || isConversationActionBusy.value) return;
+                isConversationActionBusy.value = true;
+                conversationError.value = '';
+                try {
+                    const response = await fetch(
+                        apiUrl(`/api/v1/notes/${encodeURIComponent(currentNoteId.value)}/conversations/${encodeURIComponent(conversation.conversation_id)}`),
+                        {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ pinned: !conversation.pinned_at })
+                        }
+                    );
+                    if (!response.ok) throw new Error(await response.text());
+                    const updated = normalizeConversation(await response.json());
+                    noteConversations.value = noteConversations.value.map(item =>
+                        item.conversation_id === updated.conversation_id ? updated : item
+                    );
+                    closeConversationMenu();
+                    await loadNoteConversations();
+                } catch (error) {
+                    conversationError.value = error.message || 'Failed to update discussion';
+                } finally {
+                    isConversationActionBusy.value = false;
+                }
+            };
+
+            const startDeleteConversation = (conversation) => {
+                if (!conversation?.conversation_id || conversation.is_default || isConversationActionBusy.value) return;
+                closeConversationMenu();
+                deleteConversationTarget.value = conversation;
+            };
+
+            const cancelDeleteConversation = () => {
+                deleteConversationTarget.value = null;
+            };
+
+            const confirmDeleteConversation = async () => {
+                const conversation = deleteConversationTarget.value;
+                if (!conversation?.conversation_id || conversation.is_default || isConversationActionBusy.value) return;
+                isConversationActionBusy.value = true;
+                conversationError.value = '';
+                try {
+                    const response = await fetch(
+                        apiUrl(`/api/v1/notes/${encodeURIComponent(currentNoteId.value)}/conversations/${encodeURIComponent(conversation.conversation_id)}`),
+                        { method: 'DELETE' }
+                    );
+                    if (!response.ok) throw new Error(await response.text());
+                    const deletedId = conversation.conversation_id;
+                    noteConversations.value = noteConversations.value.filter(item => item.conversation_id !== deletedId);
+                    cancelDeleteConversation();
+                    if (currentConversationId.value === deletedId) {
+                        const fallback = noteConversations.value.find(item => item.is_default) || noteConversations.value[0];
+                        if (fallback) {
+                            setCurrentConversationId(fallback.conversation_id);
+                            syncNoteUrl();
+                            await loadConversationMessages();
+                        }
+                    }
+                    await loadNoteConversations();
+                } catch (error) {
+                    conversationError.value = error.message || 'Failed to delete discussion';
+                } finally {
+                    isConversationActionBusy.value = false;
                 }
             };
 
@@ -1780,9 +2057,22 @@
                 openDocumentOutline();
             };
 
+            const handleConversationMenuPointerDown = (event) => {
+                if (!openConversationMenuId.value) return;
+                const target = event.target;
+                if (target?.closest?.('.conversation-dropdown-menu')) return;
+                if (conversationTreePanelRef.value?.contains?.(target)) return;
+                closeConversationMenu();
+            };
+
             const handleKeyDown = (e) => {
                 const activeTag = document.activeElement?.tagName;
                 const isInputFocused = activeTag === 'INPUT' || activeTag === 'TEXTAREA';
+
+                if (e.key === 'Escape' && openConversationMenuId.value) {
+                    closeConversationMenu();
+                    return;
+                }
 
                 if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
                     e.preventDefault();
@@ -2019,6 +2309,8 @@
                 const maxHeight = window.innerHeight - 150;
                 if (panelHeight.value > maxHeight) panelHeight.value = maxHeight;
                 if (currentNoteId.value) updateConversationTreePosition();
+                const openConversation = noteConversations.value.find(item => item.conversation_id === openConversationMenuId.value);
+                if (openConversation) updateConversationMenuPosition(openConversation);
                 adjustInputTextareaHeight();
                 updateOutlineLayout();
                 updateActiveOutline();
@@ -2087,6 +2379,7 @@
 
                     const documentContainer = document.getElementById('document-container');
                     if (documentContainer) documentContainer.addEventListener('scroll', updateActiveOutline, { passive: true });
+                    document.addEventListener('pointerdown', handleConversationMenuPointerDown);
                     window.addEventListener('keydown', handleKeyDown);
                     window.addEventListener('resize', handleResize);
                 } finally {
@@ -2099,6 +2392,7 @@
                 window.removeEventListener('resize', handleResize);
                 const documentContainer = document.getElementById('document-container');
                 documentContainer?.removeEventListener('scroll', updateActiveOutline);
+                document.removeEventListener('pointerdown', handleConversationMenuPointerDown);
                 document.removeEventListener('mousemove', handleDragging);
                 document.removeEventListener('mouseup', stopDragging);
                 if (autosaveTimer) window.clearTimeout(autosaveTimer);
@@ -2148,9 +2442,14 @@
                 isLoadingConversations,
                 isCreatingConversation,
                 isRenamingConversation,
+                isConversationActionBusy,
                 editingConversationId,
                 renameConversationDraft,
                 conversationError,
+                hoveredConversationId,
+                openConversationMenuId,
+                deleteConversationTarget,
+                conversationMenuStyle,
                 showConversationTree,
                 conversationTreeRef,
                 conversationTreePanelRef,
@@ -2175,9 +2474,16 @@
                 startRenameConversation,
                 cancelRenameConversation,
                 saveConversationTitle,
+                toggleConversationPinned,
+                startDeleteConversation,
+                cancelDeleteConversation,
+                confirmDeleteConversation,
                 conversationTitle,
                 currentConversationTitle,
                 isCurrentConversation,
+                conversationActionIcon,
+                handleConversationRowLeave,
+                toggleConversationMenu,
                 saveStatus,
                 noteLoadError,
                 openLibrary,

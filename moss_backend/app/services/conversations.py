@@ -26,6 +26,8 @@ class ConversationRecord:
     updated_at: str
     note_id: str | None = None
     is_default: bool = False
+    pinned_at: str | None = None
+    deleted_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -148,7 +150,9 @@ class ConversationStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     note_id TEXT,
-                    is_default INTEGER NOT NULL DEFAULT 0
+                    is_default INTEGER NOT NULL DEFAULT 0,
+                    pinned_at TEXT,
+                    deleted_at TEXT
                 )
                 """
             )
@@ -162,6 +166,10 @@ class ConversationStore:
                     ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0
                     """
                 )
+            if "pinned_at" not in columns:
+                conn.execute("ALTER TABLE conversations ADD COLUMN pinned_at TEXT")
+            if "deleted_at" not in columns:
+                conn.execute("ALTER TABLE conversations ADD COLUMN deleted_at TEXT")
             conn.commit()
 
     def _connect(self) -> sqlite3.Connection:
@@ -184,6 +192,12 @@ class ConversationStore:
                 else str(row["note_id"])
             ),
             is_default=bool(row["is_default"]) if "is_default" in columns else False,
+            pinned_at=None
+            if "pinned_at" not in columns or row["pinned_at"] is None
+            else str(row["pinned_at"]),
+            deleted_at=None
+            if "deleted_at" not in columns or row["deleted_at"] is None
+            else str(row["deleted_at"]),
         )
 
     def _table_columns(self, conn: sqlite3.Connection, table_name: str) -> set[str]:

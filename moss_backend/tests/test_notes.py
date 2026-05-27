@@ -242,6 +242,80 @@ class NoteStoreTests(unittest.TestCase):
         )
         self.assertIn("Polished structure", [item.title for item in conversations])
 
+    def test_pin_conversation_moves_it_above_unpinned_discussions(self) -> None:
+        store = NoteStore(self.make_temp_dir() / "metadata.sqlite3")
+        created = store.create_note(DEFAULT_USER_ID)
+        first = store.create_conversation_for_note(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+        )
+        time.sleep(0.01)
+        second = store.create_conversation_for_note(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+        )
+
+        pinned = store.update_conversation(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+            first.conversation_id,
+            pinned=True,
+        )
+
+        self.assertIsNotNone(pinned.pinned_at)
+        conversations = store.list_note_conversations(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+        )
+        self.assertEqual(conversations[0].conversation_id, first.conversation_id)
+        self.assertEqual(conversations[1].conversation_id, created.default_conversation.conversation_id)
+        self.assertEqual(conversations[2].conversation_id, second.conversation_id)
+
+    def test_delete_conversation_soft_deletes_and_selects_default_fallback(self) -> None:
+        store = NoteStore(self.make_temp_dir() / "metadata.sqlite3")
+        created = store.create_note(DEFAULT_USER_ID)
+        discussion = store.create_conversation_for_note(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+        )
+        self.assertEqual(
+            store.get_note(DEFAULT_USER_ID, created.note.note_id).active_conversation_id,
+            discussion.conversation_id,
+        )
+
+        deleted = store.delete_conversation(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+            discussion.conversation_id,
+        )
+
+        self.assertEqual(deleted.conversation_id, discussion.conversation_id)
+        self.assertIsNotNone(deleted.deleted_at)
+        conversations = store.list_note_conversations(
+            DEFAULT_USER_ID,
+            created.note.note_id,
+        )
+        self.assertEqual(
+            [item.conversation_id for item in conversations],
+            [created.default_conversation.conversation_id],
+        )
+        loaded = store.get_note(DEFAULT_USER_ID, created.note.note_id)
+        self.assertEqual(
+            loaded.active_conversation_id,
+            created.default_conversation.conversation_id,
+        )
+
+    def test_delete_default_conversation_is_rejected(self) -> None:
+        store = NoteStore(self.make_temp_dir() / "metadata.sqlite3")
+        created = store.create_note(DEFAULT_USER_ID)
+
+        with self.assertRaises(ValueError):
+            store.delete_conversation(
+                DEFAULT_USER_ID,
+                created.note.note_id,
+                created.default_conversation.conversation_id,
+            )
+
     def test_mark_conversation_opened_does_not_touch_note_updated_at(self) -> None:
         store = NoteStore(self.make_temp_dir() / "metadata.sqlite3")
         created = store.create_note(DEFAULT_USER_ID)

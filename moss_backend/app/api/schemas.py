@@ -127,6 +127,7 @@ class NoteConversationResponse(BaseModel):
     note_id: str
     title: str
     is_default: bool
+    pinned_at: str | None = None
     created_at: str
     updated_at: str
 
@@ -141,12 +142,19 @@ class CreateNoteConversationResponse(BaseModel):
     note_id: str
     title: str
     is_default: bool
+    pinned_at: str | None = None
     created_at: str
     updated_at: str
 
 
 class UpdateNoteConversationRequest(BaseModel):
-    title: str
+    title: str | None = None
+    pinned: bool | None = None
+
+
+class DeleteNoteConversationResponse(BaseModel):
+    conversation_id: str
+    deleted_at: str
 
 
 class ConversationMessageResponse(BaseModel):

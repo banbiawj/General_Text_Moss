@@ -1,5 +1,6 @@
 {
   "scripts": {
+    "test:chat-layout": "node ./tests/chat-layout.test.mjs",
     "build:css": "node ./node_modules/@tailwindcss/cli/dist/index.mjs -i ./assets/tailwind.css -o ./static/css/tailwind.css --minify"
   },
   "devDependencies": {

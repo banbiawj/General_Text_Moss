@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Moss waiting state hybrid</title>
+  <link rel="stylesheet" href="Moss%20waiting%20state%20hybrid_files/all.min.css">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #f6f6f4;
+      color: #171717;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.45;
+    }
+    .page {
+      min-height: 100vh;
+      padding: 28px;
+    }
+    .topbar {
+      align-items: flex-end;
+      display: flex;
+      gap: 22px;
+      justify-content: space-between;
+      margin: 0 auto 22px;
+      max-width: 1180px;
+    }
+    .eyebrow {
+      color: #737373;
+      font-size: 12px;
+      font-weight: 650;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 650;
+      letter-spacing: 0;
+      margin: 6px 0 0;
+    }
+    .hint {
+      color: #737373;
+      font-size: 14px;
+      margin: 0;
+      max-width: 430px;
+    }
+    .stage {
+      background: #fff;
+      border: 1px solid #e4e4e2;
+      border-radius: 8px;
+      box-shadow: 0 18px 60px rgba(15, 23, 42, 0.06);
+      margin: 0 auto;
+      max-width: 1180px;
+      overflow: hidden;
+    }
+    .stage-header {
+      align-items: center;
+      border-bottom: 1px solid #ededeb;
+      display: flex;
+      justify-content: space-between;
+      padding: 14px 18px;
+    }
+    .stage-title {
+      color: #404040;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .stage-meta {
+      color: #8a8a8a;
+      font-size: 12px;
+    }
+    .preview-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+      gap: 0;
+    }
+    .moss-window-wrap {
+      background: #fbfbfa;
+      border-right: 1px solid #ededeb;
+      padding: 26px;
+    }
+    .moss-window {
+      background: #fafafa;
+      border: 1px solid #e9e9e7;
+      border-radius: 8px;
+      height: 510px;
+      overflow: hidden;
+      position: relative;
+    }
+    .window-header {
+      align-items: center;
+      border-bottom: 1px solid #ececec;
+      display: flex;
+      gap: 8px;
+      height: 42px;
+      padding: 0 14px;
+    }
+    .dot {
+      background: #d4d4d4;
+      border-radius: 50%;
+      height: 7px;
+      width: 7px;
+    }
+    .window-title {
+      color: #737373;
+      font-size: 11px;
+      font-weight: 650;
+      margin-left: 6px;
+    }
+    .chat-area {
+      height: calc(100% - 42px);
+      padding: 34px 38px;
+    }
+    .user-row {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 34px;
+    }
+    .user-message {
+      background: #171717;
+      border-radius: 16px 16px 4px 16px;
+      color: #fff;
+      font-size: 14px;
+      max-width: 68%;
+      padding: 12px 14px;
+    }
+    .ai-row {
+      align-items: flex-start;
+      display: grid;
+      gap: 16px;
+      grid-template-columns: 32px minmax(0, 1fr);
+    }
+    .moss-avatar {
+      align-items: center;
+      animation: avatarBreath 1.9s ease-in-out infinite;
+      background: linear-gradient(180deg, #fff, #f9fbfa);
+      border: 1px solid #e5e5e5;
+      border-radius: 50%;
+      color: #525252;
+      display: flex;
+      font-size: 12px;
+      height: 32px;
+      justify-content: center;
+      position: relative;
+      width: 32px;
+    }
+    .moss-avatar::before {
+      animation: softHalo 1.9s ease-in-out infinite;
+      border: 1px solid rgba(23, 23, 23, 0.1);
+      border-radius: 50%;
+      content: "";
+      inset: -5px;
+      position: absolute;
+    }
+    .moss-avatar i {
+      animation: starWake 1.6s ease-in-out infinite;
+      display: inline-block;
+    }
+    .answer-space {
+      padding-top: 2px;
+    }
+    .stage-list {
+      display: grid;
+      gap: 13px;
+      margin-top: 1px;
+      max-width: 440px;
+    }
+    .stage-item {
+      align-items: center;
+      color: #9a9a9a;
+      display: flex;
+      font-size: 13px;
+      gap: 10px;
+      min-height: 20px;
+    }
+    .stage-dot {
+      background: #d9d9d7;
+      border-radius: 50%;
+      flex: 0 0 auto;
+      height: 7px;
+      width: 7px;
+    }
+    .stage-item.active {
+      color: #171717;
+      font-weight: 600;
+    }
+    .stage-item.active .stage-dot {
+      animation: dotGlow 1.2s ease-in-out infinite;
+      background: #171717;
+    }
+    .stage-item.done {
+      color: #525252;
+    }
+    .stage-item.done .stage-dot {
+      background: #b7d8c4;
+    }
+    .subtle-answer {
+      border-top: 1px solid #eeeeec;
+      margin-top: 24px;
+      max-width: 500px;
+      padding-top: 18px;
+    }
+    .skeleton {
+      animation: shimmer 1.55s ease-in-out infinite;
+      background: linear-gradient(90deg, #ececea 0%, #f7f7f5 42%, #ececea 84%);
+      background-size: 220% 100%;
+      border-radius: 999px;
+      height: 8px;
+      margin-bottom: 10px;
+    }
+    .skeleton.long { width: 88%; }
+    .skeleton.mid { width: 70%; }
+    .skeleton.short { width: 42%; }
+    .notes {
+      padding: 26px;
+    }
+    .notes h2 {
+      font-size: 18px;
+      letter-spacing: 0;
+      margin: 0 0 12px;
+    }
+    .notes p {
+      color: #686868;
+      font-size: 14px;
+      margin: 0 0 16px;
+    }
+    .spec-list {
+      display: grid;
+      gap: 10px;
+      margin: 20px 0 0;
+    }
+    .spec {
+      background: #f8f8f6;
+      border: 1px solid #eeeeec;
+      border-radius: 8px;
+      padding: 11px 12px;
+    }
+    .spec strong {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 3px;
+    }
+    .spec span {
+      color: #737373;
+      display: block;
+      font-size: 12px;
+    }
+    .choice-area {
+      border-top: 1px solid #ededeb;
+      display: flex;
+      justify-content: center;
+      padding: 18px;
+    }
+    .choice-button {
+      background: #171717;
+      border: 1px solid #171717;
+      border-radius: 999px;
+      color: #fff;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 650;
+      padding: 10px 16px;
+      transition: transform 0.14s ease, background 0.14s ease;
+    }
+    .choice-button:hover {
+      background: #2f2f2f;
+      transform: translateY(-1px);
+    }
+    .choice-button.selected {
+      background: #28613d;
+      border-color: #28613d;
+    }
+    .selection-note {
+      color: #737373;
+      font-size: 13px;
+      margin: 16px auto 0;
+      max-width: 1180px;
+      text-align: center;
+    }
+    @keyframes avatarBreath {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(23, 23, 23, 0.08); transform: scale(1); }
+      50% { box-shadow: 0 0 0 7px rgba(183, 216, 196, 0.34); transform: scale(1.02); }
+    }
+    @keyframes softHalo {
+      0%, 100% { opacity: 0.35; transform: scale(0.96); }
+      50% { opacity: 0.85; transform: scale(1.04); }
+    }
+    @keyframes starWake {
+      0%, 100% { color: #525252; transform: rotate(0deg) scale(1); }
+      50% { color: #171717; transform: rotate(45deg) scale(1.08); }
+    }
+    @keyframes dotGlow {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(23, 23, 23, 0.12); }
+      50% { box-shadow: 0 0 0 6px rgba(23, 23, 23, 0.05); }
+    }
+    @keyframes shimmer {
+      0% { background-position: 120% 0; }
+      100% { background-position: -120% 0; }
+    }
+    @media (max-width: 900px) {
+      .preview-grid { grid-template-columns: 1fr; }
+      .moss-window-wrap { border-right: 0; border-bottom: 1px solid #ededeb; }
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .chat-area { padding: 28px 22px; }
+      .user-message { max-width: 82%; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">Selected direction</div>
+        <h1>头像呼吸 + 阶段状态</h1>
+      </div>
+      <p class="hint">这是基于方案 C 的调整版：去掉头像信号线，不用等待气泡，保留阶段信息和 Moss 头像的轻微激活感。</p>
+    </header>
+
+    <section class="stage">
+      <div class="stage-header">
+        <div class="stage-title">Hybrid preview</div>
+        <div class="stage-meta">No bubble, no signal line</div>
+      </div>
+      <div class="preview-grid">
+        <div class="moss-window-wrap">
+          <div class="moss-window">
+            <div class="window-header">
+              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+              <span class="window-title">index chat area - current Moss icon</span>
+            </div>
+            <div class="chat-area">
+              <div class="user-row">
+                <div class="user-message">帮我把这一段改得更克制一些</div>
+              </div>
+              <div class="ai-row">
+                <div class="moss-avatar"><i class="fa-solid fa-asterisk"></i></div>
+                <div class="answer-space">
+                  <div class="stage-list">
+                    <div class="stage-item done"><span class="stage-dot"></span><span>Context captured</span></div>
+                    <div class="stage-item active"><span class="stage-dot"></span><span>Reading selected context</span></div>
+                    <div class="stage-item"><span class="stage-dot"></span><span>Planning response</span></div>
+                    <div class="stage-item"><span class="stage-dot"></span><span>Writing answer</span></div>
+                  </div>
+                  <div class="subtle-answer">
+                    <div class="skeleton long"></div>
+                    <div class="skeleton mid"></div>
+                    <div class="skeleton short"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="notes">
+          <h2>设计要点</h2>
+          <p>头像负责“正在工作”的动势，阶段列表负责解释等待原因。骨架区域不做气泡边框，只作为未来回答正文的低对比度占位。</p>
+          <div class="spec-list">
+            <div class="spec">
+              <strong>头像</strong>
+              <span>轻微呼吸外圈，星号小幅亮起或旋转，避免强转圈 loading。</span>
+            </div>
+            <div class="spec">
+              <strong>阶段</strong>
+              <span>最多 3-4 条，当前阶段高亮，其余保持灰色；收到回答后整体淡出。</span>
+            </div>
+            <div class="spec">
+              <strong>回答衔接</strong>
+              <span>首个 token 到达时，骨架原地替换成正式 markdown 内容。</span>
+            </div>
+            <div class="spec">
+              <strong>文案</strong>
+              <span>保持模糊但真实，不展示百分比，不承诺不可验证的精确进度。</span>
+            </div>
+          </div>
+        </aside>
+      </div>
+      <div class="choice-area">
+        <button class="choice-button" data-choice="hybrid-avatar-breathing-stages" onclick="toggleSelect(this)">
+          采用这个方向
+        </button>
+      </div>
+    </section>
+
+    <p class="selection-note">打开页面后如果这个方向对了，可以点“采用这个方向”，或者回到对话里告诉我还要调整头像、阶段文案或骨架强弱。</p>
+  </main>
+
+
+
+    <div id="ext-xpath-win" class="ui-resizable">
+    <div class="row">
+      <div class="col-8">
+        <div class="xpath-section">
+              <h5 class="fw-bold">询问 </h5>
+          <textarea class="xpath-holder" readonly="readonly"></textarea>
+          <div class="row">
+            <div class=" col-6">
+              <h5 class="fw-bold"> 找到类名</h5>
+              <textarea class="text-area" id="floatingTextarea2" style="width:95%"></textarea>
+            </div>
+            <div class="col-6">
+              <h5 class="fw-bold"> 找到 ID 名称</h5>
+              <textarea class="text-area" id="floatingTextarea2"></textarea>
+            </div>
+            <div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-4">
+      <div class="result-div">
+        <h5>结果</h5>
+        <p></p>
+      </div>
+      </div>
+    </div>
+    <p>按住 Shift 键并将鼠标悬停在元素上</p>
+    <hr>
+    <div class="down-arrow-img">
+    <img src="Moss%20waiting%20state%20hybrid_files/drag.png" width="25px">
+    </div>
+    <hr>
+  </div>
+  
+    <div id="ext-hover-highlighter"></div>
+  
+    <div id="xpath-bottom-div" class="visible"></div>
+  </body><div style="all: initial;"><div style="all: initial;" id="__hcfy__"></div></div></html>

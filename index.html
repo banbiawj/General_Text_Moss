@@ -104,6 +104,105 @@
         }
         .animate-pop-in { animation: popIn 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 
+        .moss-waiting-avatar {
+            animation: mossWaitingAvatarBreath 1.9s ease-in-out infinite;
+            position: relative;
+        }
+        .moss-waiting-avatar::before {
+            animation: mossWaitingSoftHalo 1.9s ease-in-out infinite;
+            border: 1px solid rgb(23 23 23 / 0.1);
+            border-radius: 9999px;
+            content: "";
+            inset: -5px;
+            position: absolute;
+        }
+        .moss-waiting-avatar i {
+            animation: mossWaitingIconWake 1.6s ease-in-out infinite;
+            display: inline-block;
+            transform-origin: center;
+        }
+        .moss-waiting-stage-list {
+            display: grid;
+            gap: 0.8125rem;
+            max-width: 28rem;
+        }
+        .moss-waiting-stage {
+            align-items: center;
+            color: #9a9a9a;
+            display: flex;
+            font-size: 0.8125rem;
+            gap: 0.625rem;
+            min-height: 1.25rem;
+        }
+        .moss-waiting-stage-dot {
+            background: #d9d9d7;
+            border-radius: 9999px;
+            flex: 0 0 auto;
+            height: 0.4375rem;
+            width: 0.4375rem;
+        }
+        .moss-waiting-stage.is-active {
+            color: #171717;
+            font-weight: 650;
+        }
+        .moss-waiting-stage.is-active .moss-waiting-stage-dot {
+            animation: mossWaitingDotGlow 1.2s ease-in-out infinite;
+            background: #171717;
+        }
+        .moss-waiting-stage.is-done {
+            color: #525252;
+        }
+        .moss-waiting-stage.is-done .moss-waiting-stage-dot {
+            background: #b7d8c4;
+        }
+        .moss-waiting-skeleton {
+            border-top: 1px solid #eeeeec;
+            margin-top: 1.5rem;
+            max-width: 31rem;
+            padding-top: 1.125rem;
+        }
+        .moss-waiting-skeleton-line {
+            animation: mossWaitingShimmer 1.55s ease-in-out infinite;
+            background: linear-gradient(90deg, #ececea 0%, #f7f7f5 42%, #ececea 84%);
+            background-size: 220% 100%;
+            border-radius: 9999px;
+            height: 0.5rem;
+            margin-bottom: 0.625rem;
+        }
+        .moss-waiting-skeleton-line.long { width: 88%; }
+        .moss-waiting-skeleton-line.mid { width: 70%; }
+        .moss-waiting-skeleton-line.short { width: 42%; }
+        @keyframes mossWaitingAvatarBreath {
+            0%, 100% { box-shadow: 0 0 0 0 rgb(23 23 23 / 0.08); transform: scale(1); }
+            50% { box-shadow: 0 0 0 7px rgb(183 216 196 / 0.34); transform: scale(1.02); }
+        }
+        @keyframes mossWaitingSoftHalo {
+            0%, 100% { opacity: 0.35; transform: scale(0.96); }
+            50% { opacity: 0.85; transform: scale(1.04); }
+        }
+        @keyframes mossWaitingIconWake {
+            0%, 100% { color: #525252; transform: rotate(0deg) scale(1); }
+            50% { color: #171717; transform: rotate(45deg) scale(1.08); }
+        }
+        @keyframes mossWaitingDotGlow {
+            0%, 100% { box-shadow: 0 0 0 0 rgb(23 23 23 / 0.12); }
+            50% { box-shadow: 0 0 0 6px rgb(23 23 23 / 0.05); }
+        }
+        @keyframes mossWaitingShimmer {
+            0% { background-position: 120% 0; }
+            100% { background-position: -120% 0; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .moss-waiting-avatar,
+            .moss-waiting-avatar::before,
+            .moss-waiting-avatar i,
+            .moss-waiting-stage.is-active .moss-waiting-stage-dot,
+            .moss-waiting-skeleton-line {
+                animation-duration: 0.001ms !important;
+                animation-iteration-count: 1 !important;
+            }
+        }
+
         .conversation-dropdown-menu {
             position: fixed;
             width: 10.5rem;
@@ -544,11 +643,24 @@
             </div>
 
             <div v-if="isThinking" class="flex gap-4 max-w-[85%]">
-                <div class="w-8 h-8 rounded-full border border-gray-200 bg-white flex items-center justify-center shrink-0">
-                    <i class="fa-solid fa-asterisk text-gray-300 text-xs"></i>
+                <div class="moss-waiting-avatar w-8 h-8 rounded-full border border-gray-200 bg-white flex items-center justify-center shrink-0">
+                    <i class="fa-solid fa-asterisk text-gray-600 text-xs"></i>
                 </div>
-                <div class="p-4 rounded-2xl rounded-tl-sm bg-white border border-gray-100 flex items-center h-[52px] shadow-sm">
-                    <i class="fa-solid fa-ellipsis text-gray-400 animate-pulse"></i>
+                <div class="min-w-0 flex-1 pt-0.5">
+                    <div v-if="waitingStages.length" class="moss-waiting-stage-list" role="status" aria-live="polite">
+                        <div v-for="stage in waitingStages"
+                             :key="stage.node"
+                             class="moss-waiting-stage"
+                             :class="{ 'is-active': stage.status === 'active', 'is-done': stage.status === 'done' }">
+                            <span class="moss-waiting-stage-dot"></span>
+                            <span>{{ stage.label }}</span>
+                        </div>
+                    </div>
+                    <div class="moss-waiting-skeleton" aria-hidden="true">
+                        <div class="moss-waiting-skeleton-line long"></div>
+                        <div class="moss-waiting-skeleton-line mid"></div>
+                        <div class="moss-waiting-skeleton-line short"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -780,6 +892,35 @@
             };
             const normalizeTaskType = (taskType = '') => Object.hasOwn(taskTypeLabels, taskType) ? taskType : '';
             const getTaskTypeLabel = (taskType = '') => taskTypeLabels[taskType] || taskType;
+            const waitingStageDefinitions = {
+                intent: 'Understanding request',
+                task_assemble: 'Reading context',
+                execute: 'Preparing response',
+                tools: 'Applying document changes',
+                task_advance: 'Checking next step'
+            };
+            const waitingStages = ref([]);
+            const resetWaitingStages = () => {
+                waitingStages.value = [];
+            };
+            const startWaitingStage = (node = '') => {
+                const label = waitingStageDefinitions[node];
+                if (!label) return;
+                const stageIndex = waitingStages.value.findIndex(stage => stage.node === node);
+                if (stageIndex >= 0) {
+                    waitingStages.value[stageIndex] = { node, label, status: 'active' };
+                    return;
+                }
+                waitingStages.value.push({ node, label, status: 'active' });
+            };
+            const completeWaitingStage = (node = '') => {
+                const stageIndex = waitingStages.value.findIndex(stage => stage.node === node);
+                if (stageIndex < 0) return;
+                waitingStages.value[stageIndex] = {
+                    ...waitingStages.value[stageIndex],
+                    status: 'done'
+                };
+            };
 
             const createNoticeMessage = (content = '') => ({ role: 'ai', kind: 'notice', content });
             const createAnswerMessage = (content = '', taskType = '') => ({
@@ -2122,6 +2263,7 @@
 
                 const currentInput = inputText.value.trim();
                 let requestAnchors = null;
+                resetWaitingStages();
                 messages.value.push({ role: 'user', content: currentInput });
                 inputText.value = '';
                 await nextTick();
@@ -2172,6 +2314,14 @@
                             setCurrentConversationId(data.conversation_id);
                         }
 
+                        if (event === 'node_start') {
+                            startWaitingStage(data.node);
+                        }
+
+                        if (event === 'node_end') {
+                            completeWaitingStage(data.node);
+                        }
+
                         if (event === 'node_end' && data.node === 'intent') {
                             const taskType = normalizeTaskType(data.output?.task_type);
                             if (taskType) {
@@ -2220,6 +2370,7 @@
                     }
                     isThinking.value = false;
                     isModifying.value = false;
+                    resetWaitingStages();
                     if (currentNoteId.value) {
                         await loadNoteConversations().catch(() => {});
                     }
@@ -2407,6 +2558,7 @@
                 contentHTML,
                 isModifying,
                 isThinking,
+                waitingStages,
                 panelHeight,
                 sendMessage,
                 chatPaddingTop,

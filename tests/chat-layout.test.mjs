@@ -70,6 +70,16 @@ assert.ok(
 );
 
 assert.ok(
+  html.includes('moss-waiting-avatar-slot'),
+  'waiting UI should reserve layout space around the breathing Moss avatar'
+);
+
+assert.ok(
+  html.includes('.moss-waiting-avatar-slot'),
+  'waiting avatar slot styles should define the reserved halo space'
+);
+
+assert.ok(
   html.includes('fa-solid fa-asterisk'),
   'waiting UI should reuse the existing Font Awesome Moss asterisk icon'
 );

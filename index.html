@@ -108,6 +108,14 @@
             animation: mossWaitingAvatarBreath 1.9s ease-in-out infinite;
             position: relative;
         }
+        .moss-waiting-avatar-slot {
+            align-items: center;
+            display: flex;
+            flex: 0 0 2.75rem;
+            height: 2.75rem;
+            justify-content: center;
+            width: 2.75rem;
+        }
         .moss-waiting-avatar::before {
             animation: mossWaitingSoftHalo 1.9s ease-in-out infinite;
             border: 1px solid rgb(23 23 23 / 0.1);
@@ -642,9 +650,11 @@
                 </template>
             </div>
 
-            <div v-if="isThinking" class="flex gap-4 max-w-[85%]">
-                <div class="moss-waiting-avatar w-8 h-8 rounded-full border border-gray-200 bg-white flex items-center justify-center shrink-0">
-                    <i class="fa-solid fa-asterisk text-gray-600 text-xs"></i>
+            <div v-if="isThinking" class="flex gap-3 max-w-[85%] py-1">
+                <div class="moss-waiting-avatar-slot">
+                    <div class="moss-waiting-avatar w-8 h-8 rounded-full border border-gray-200 bg-white flex items-center justify-center">
+                        <i class="fa-solid fa-asterisk text-gray-600 text-xs"></i>
+                    </div>
                 </div>
                 <div class="min-w-0 flex-1 pt-0.5">
                     <div v-if="waitingStages.length" class="moss-waiting-stage-list" role="status" aria-live="polite">

@@ -27,6 +27,16 @@ assert.ok(
 );
 
 assert.ok(
+  html.includes('.chat-markdown :where(ul) { margin: 0.5rem 0 0.75rem; padding-left: 1.25rem; list-style: disc; }'),
+  'unordered markdown lists should keep the compact chat indentation'
+);
+
+assert.ok(
+  html.includes('.chat-markdown :where(ol) { margin: 0.5rem 0 0.75rem; padding-left: 2.5rem; list-style: decimal outside; }'),
+  'ordered markdown lists should reserve enough left padding for two-digit markers'
+);
+
+assert.ok(
   html.includes('const waitingStageDefinitions = {'),
   'index should define SSE waiting stage definitions'
 );

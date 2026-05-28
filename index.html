@@ -70,17 +70,14 @@
             align-items: center;
             animation: loading-stage-in .24s ease-out both;
             display: flex;
-            flex-direction: column;
-            gap: .75rem;
-            text-align: center;
+            gap: .875rem;
+            text-align: left;
         }
-        .editor-loading-mark {
-            animation: loading-pulse 1.8s ease-in-out infinite;
-            color: #171717;
-            font-size: clamp(3.25rem, 8vw, 4.5rem);
-            font-weight: 600;
-            letter-spacing: 0;
-            line-height: .8;
+        .editor-loading-stage-inline {
+            flex-direction: row;
+        }
+        .editor-loading-avatar-slot {
+            flex-basis: 2.75rem;
         }
         .editor-loading-text {
             color: #737373;
@@ -88,53 +85,10 @@
             font-weight: 500;
             letter-spacing: .04em;
             line-height: 1;
-        }
-        .editor-loading-steps {
-            display: grid;
-            gap: .625rem;
-            margin-top: .75rem;
-            min-width: 13rem;
-        }
-        .editor-loading-step {
-            align-items: center;
-            color: #737373;
-            display: flex;
-            font-size: .75rem;
-            gap: .625rem;
-            justify-content: center;
-            line-height: 1.2;
-        }
-        .editor-loading-step-dot {
-            background: #d9d9d7;
-            border-radius: 9999px;
-            flex: 0 0 auto;
-            height: .4375rem;
-            width: .4375rem;
-        }
-        .editor-loading-step.is-active {
-            color: #171717;
-            font-weight: 650;
-        }
-        .editor-loading-step.is-active .editor-loading-step-dot {
-            animation: mossWaitingDotGlow 1.2s ease-in-out infinite;
-            background: #171717;
-        }
-        .editor-loading-step.is-done .editor-loading-step-dot {
-            background: #b7d8c4;
-        }
-        .editor-loading-overlay.is-compact .editor-loading-stage {
-            gap: .625rem;
-        }
-        .editor-loading-overlay.is-compact .editor-loading-mark {
-            font-size: clamp(2.5rem, 7vw, 3.25rem);
-        }
-        .editor-loading-overlay.is-compact .editor-loading-steps {
-            display: none;
+            white-space: nowrap;
         }
         @media (prefers-reduced-motion: reduce) {
-            .editor-loading-stage,
-            .editor-loading-mark,
-            .editor-loading-step.is-active .editor-loading-step-dot {
+            .editor-loading-stage {
                 animation: none;
                 transition: none;
             }
@@ -465,24 +419,17 @@
                 <div aria-hidden="true" :style="{ height: outlineScrollSpacerHeight + 'px' }"></div>
             </div>
 
-            <div v-if="isModifying"
+            <div v-if="isDocumentModifying"
                  class="editor-loading-overlay"
-                 :class="{ 'is-compact': panelHeight < 360 }"
                  role="status"
                  aria-live="polite">
-                <div class="editor-loading-stage">
-                    <div class="editor-loading-mark" aria-hidden="true">*</div>
-                    <div class="editor-loading-text">moss is thinking...</div>
-                    <div class="editor-loading-steps" aria-hidden="true">
-                        <div class="editor-loading-step is-done">
-                            <span class="editor-loading-step-dot"></span>
-                            <span>Reading context</span>
-                        </div>
-                        <div class="editor-loading-step is-active">
-                            <span class="editor-loading-step-dot"></span>
-                            <span>Preparing response</span>
+                <div class="editor-loading-stage editor-loading-stage-inline">
+                    <div class="moss-waiting-avatar-slot editor-loading-avatar-slot">
+                        <div class="moss-waiting-avatar w-8 h-8 rounded-full border border-gray-200 bg-white flex items-center justify-center">
+                            <i class="fa-solid fa-asterisk text-gray-600 text-xs"></i>
                         </div>
                     </div>
+                    <div class="editor-loading-text">moss working ...</div>
                 </div>
             </div>
         </div>
@@ -921,6 +868,7 @@
             const inputText = ref('');
             const inputTextareaRef = ref(null);
             const isModifying = ref(false);
+            const isDocumentModifying = ref(false);
             const isThinking = ref(false);
             const isFullScreen = ref(false);
             const isSaving = ref(false);
@@ -2451,6 +2399,7 @@
                         }
 
                         if (event === 'dom_mutation') {
+                            isDocumentModifying.value = true;
                             await applyDomMutation(data);
                         }
 
@@ -2479,6 +2428,7 @@
                         cleanupTemporaryAnchors(requestAnchors.tempAnchorId);
                         ensureTopLevelBlockIds();
                     }
+                    isDocumentModifying.value = false;
                     isThinking.value = false;
                     isModifying.value = false;
                     resetWaitingStages();
@@ -2668,6 +2618,7 @@
                 messages,
                 contentHTML,
                 isModifying,
+                isDocumentModifying,
                 isThinking,
                 waitingStages,
                 panelHeight,

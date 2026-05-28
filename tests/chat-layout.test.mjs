@@ -100,8 +100,8 @@ assert.ok(
 );
 
 assert.ok(
-  html.includes('.editor-loading-mark'),
-  'editor waiting overlay should include the startup-style Moss mark'
+  html.includes('editor-loading-stage-inline'),
+  'editor document overlay should use the selected B2 inline avatar/text layout'
 );
 
 assert.ok(
@@ -110,8 +110,8 @@ assert.ok(
 );
 
 assert.ok(
-  html.includes('moss is thinking...'),
-  'editor waiting overlay should use Moss loading copy'
+  html.includes('moss working ...'),
+  'editor document overlay should use Moss working copy'
 );
 
 assert.ok(
@@ -154,16 +154,66 @@ assert.ok(
 );
 
 assert.ok(
-  html.includes(':class="{ \'is-compact\': panelHeight < 360 }"'),
-  'editor waiting overlay should switch to a compact state when the editor panel is short'
+  html.includes('<div class="moss-waiting-avatar-slot editor-loading-avatar-slot">'),
+  'editor document overlay should reuse the chat waiting avatar slot'
 );
 
 assert.ok(
-  html.includes('.editor-loading-overlay.is-compact .editor-loading-steps'),
-  'compact editor waiting overlay should define stage-list behavior'
+  html.includes('<div class="moss-waiting-avatar w-8 h-8 rounded-full border border-gray-200 bg-white flex items-center justify-center">'),
+  'editor document overlay should reuse the exact chat waiting Moss avatar classes'
 );
 
 assert.ok(
-  html.includes('.editor-loading-overlay.is-compact .editor-loading-steps {\n            display: none;\n        }'),
-  'compact editor waiting overlay should hide stage rows to avoid clipping'
+  html.includes('<i class="fa-solid fa-asterisk text-gray-600 text-xs"></i>'),
+  'editor document overlay should reuse the Font Awesome Moss asterisk icon'
+);
+
+assert.ok(
+  !html.includes('.editor-loading-mark'),
+  'editor document overlay should not use a separate hand-drawn mark style'
+);
+
+assert.ok(
+  !html.includes('editor-loading-steps'),
+  'editor document overlay should not show waiting stage rows'
+);
+
+assert.ok(
+  !html.includes('editor-loading-step'),
+  'editor document overlay should remove per-stage row styles'
+);
+
+assert.ok(
+  !html.includes(':class="{ \'is-compact\': panelHeight < 360 }"'),
+  'editor document overlay should not need compact state after removing stage rows'
+);
+
+assert.ok(
+  html.includes('const isDocumentModifying = ref(false);'),
+  'index should track document mutation separately from general agent busy state'
+);
+
+assert.ok(
+  html.includes('<div v-if="isDocumentModifying"'),
+  'editor loading overlay should only render while the agent is applying document mutations'
+);
+
+assert.ok(
+  !html.includes('<div v-if="isModifying"\n                 class="editor-loading-overlay"'),
+  'editor loading overlay should not be tied to the general waiting state'
+);
+
+assert.ok(
+  html.includes("if (event === 'dom_mutation') {\n                            isDocumentModifying.value = true;\n                            await applyDomMutation(data);\n                        }"),
+  'document overlay should open only when a dom_mutation event is applied'
+);
+
+assert.ok(
+  html.includes('isDocumentModifying.value = false;\n                    isThinking.value = false;'),
+  'document overlay should close in the stream cleanup path'
+);
+
+assert.ok(
+  html.includes('isDocumentModifying,'),
+  'document mutation state should be returned to the Vue template'
 );

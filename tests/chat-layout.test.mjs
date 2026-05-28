@@ -93,3 +93,77 @@ assert.ok(
   html.includes('fa-solid fa-asterisk'),
   'waiting UI should reuse the existing Font Awesome Moss asterisk icon'
 );
+
+assert.ok(
+  html.includes('.editor-loading-overlay'),
+  'editor waiting overlay should define its own scheme-A loading overlay style'
+);
+
+assert.ok(
+  html.includes('.editor-loading-mark'),
+  'editor waiting overlay should include the startup-style Moss mark'
+);
+
+assert.ok(
+  html.includes('.editor-loading-text'),
+  'editor waiting overlay should include startup-style loading text'
+);
+
+assert.ok(
+  html.includes('moss is thinking...'),
+  'editor waiting overlay should use Moss loading copy'
+);
+
+assert.ok(
+  !html.includes('bg-white/40 backdrop-blur-[1px]'),
+  'editor waiting overlay should not use the old translucent Vue-like mask'
+);
+
+assert.ok(
+  !html.includes('fa-solid fa-circle-notch fa-spin text-gray-400"></i> AI is thinking'),
+  'editor waiting overlay should not use the old spinner pill'
+);
+
+const editorOverlayStyleMatch = html.match(/\.editor-loading-overlay \{([\s\S]*?)\n        \}/);
+
+assert.ok(
+  editorOverlayStyleMatch,
+  'editor waiting overlay style block should be present'
+);
+
+const editorOverlayStyle = editorOverlayStyleMatch[1];
+
+assert.ok(
+  editorOverlayStyle.includes('align-items: center;'),
+  'editor waiting overlay should center content within the current editor area'
+);
+
+assert.ok(
+  editorOverlayStyle.includes('padding: clamp(1rem, 3vh, 1.5rem);'),
+  'editor waiting overlay should use bounded padding instead of viewport-based top offset'
+);
+
+assert.ok(
+  !editorOverlayStyle.includes('align-items: flex-start;'),
+  'editor waiting overlay should not top-align loading content'
+);
+
+assert.ok(
+  !editorOverlayStyle.includes('padding-top: clamp(8rem, 36vh, 19rem);'),
+  'editor waiting overlay should not use viewport-height top padding that clips in short panels'
+);
+
+assert.ok(
+  html.includes(':class="{ \'is-compact\': panelHeight < 360 }"'),
+  'editor waiting overlay should switch to a compact state when the editor panel is short'
+);
+
+assert.ok(
+  html.includes('.editor-loading-overlay.is-compact .editor-loading-steps'),
+  'compact editor waiting overlay should define stage-list behavior'
+);
+
+assert.ok(
+  html.includes('.editor-loading-overlay.is-compact .editor-loading-steps {\n            display: none;\n        }'),
+  'compact editor waiting overlay should hide stage rows to avoid clipping'
+);

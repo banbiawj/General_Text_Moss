@@ -40,6 +40,37 @@ class FakeCompiledGraph:
         }
 
 
+class FakeReduceCompiledGraph:
+    async def astream_events(
+        self,
+        initial_state: dict[str, Any],
+        *,
+        config: dict[str, Any],
+        version: str,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        yield {
+            "event": "on_chain_start",
+            "name": "reduce",
+            "data": {},
+        }
+        yield {
+            "event": "on_chain_end",
+            "name": "reduce",
+            "data": {
+                "output": {
+                    "messages": [AIMessage(content="final response")],
+                    "pending_mutations": [
+                        {
+                            "element_id": "moss-block-1",
+                            "action_type": "replace",
+                            "new_html": "<p id=\"moss-block-1\">updated</p>",
+                        }
+                    ],
+                }
+            },
+        }
+
+
 async def drain_events(generator: AsyncGenerator[dict[str, Any], None]) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     async for event in generator:
@@ -93,6 +124,39 @@ class GraphThreadingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             fake_graph.captured_initial_state["conversation_id"],
             "conv-thread123",
+        )
+
+    async def test_stream_agent_events_publishes_reduce_outputs(self) -> None:
+        events = await drain_events(
+            stream_agent_events(
+                session_id="session-a",
+                conversation_id="conv-reduce123",
+                user_input="hello",
+                focus_element_id=None,
+                focus_block_id=None,
+                canvas_snapshot="",
+                compiled_graph=FakeReduceCompiledGraph(),
+            )
+        )
+
+        self.assertIn({"event": "node_start", "data": {"node": "reduce"}}, events)
+        self.assertIn(
+            {
+                "event": "chat_chunk",
+                "data": {"content": "final response", "done": True},
+            },
+            events,
+        )
+        self.assertIn(
+            {
+                "event": "dom_mutation",
+                "data": {
+                    "element_id": "moss-block-1",
+                    "action_type": "replace",
+                    "new_html": "<p id=\"moss-block-1\">updated</p>",
+                },
+            },
+            events,
         )
 
     async def test_same_conversation_persists_messages_and_different_conversation_isolated(self) -> None:

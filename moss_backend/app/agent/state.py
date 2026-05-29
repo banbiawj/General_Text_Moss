@@ -49,6 +49,18 @@ class AgentTask(TypedDict, total=False):
     error: str
 
 
+class AgentTaskResult(TypedDict, total=False):
+    """Result emitted by one independently executed task branch."""
+
+    task_id: str
+    task_index: int
+    request_id: str
+    status: TaskStatus
+    messages: list[BaseMessage]
+    pending_mutations: list[dict]
+    error: str
+
+
 class AgentState(TypedDict, total=False):
     """单次 Agent 运行期间在 LangGraph 节点之间传递的简化状态。
 
@@ -92,6 +104,9 @@ class AgentState(TypedDict, total=False):
     # tools_node 在调用 update_canvas_element 时追加到此列表，
     # stream_agent_events 将其作为 dom_mutation SSE 事件发送后清空。
     pending_mutations: list[dict]
+
+    # Send 分支返回的任务结果。operator.add 允许多个 task_worker 并发追加结果。
+    task_results: Annotated[list[AgentTaskResult], operator.add]
 
     # 会话与日志字段，保留给后端运行时使用。
     session_id: str

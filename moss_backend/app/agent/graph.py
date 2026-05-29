@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+import operator
 from pathlib import Path
-from typing import Any, AsyncGenerator, Literal
+from typing import Annotated, Any, AsyncGenerator, Literal, TypedDict
 from uuid import uuid4
 
 import yaml
@@ -10,9 +11,10 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Send
 from pydantic import BaseModel, Field
 
-from app.agent.state import AgentState, AgentTask, TaskType
+from app.agent.state import AgentState, AgentTask, AgentTaskResult, TaskType
 from app.core.config import get_settings
 from app.services.canvas_context import (
     context_blocks_from_html,
@@ -72,6 +74,30 @@ STATEFUL_DOCUMENT_TOOL_NAMES = {
     "canvas_read_after",
     "update_canvas_element",
 }
+
+
+class TaskWorkerState(TypedDict, total=False):
+    """Branch-local state for one Send-dispatched task."""
+
+    tasks: list[AgentTask]
+    current_task_index: int
+    source_task_index: int
+    conversation_messages: list[Any]
+    user_input: str
+    canvas_snapshot: str
+    focus_element_id: str | None
+    focus_block_id: str | None
+    task_type: TaskType
+    task_reason: str
+    worker_pending_mutations: Annotated[list[dict], operator.add]
+    task_results: Annotated[list[AgentTaskResult], operator.add]
+    session_id: str
+    conversation_id: str
+    request_id: str
+
+
+class TaskWorkerOutputState(TypedDict, total=False):
+    task_results: Annotated[list[AgentTaskResult], operator.add]
 
 
 def _prompt_template_for_task_type(task_type: TaskType) -> PromptTemplate:
@@ -420,12 +446,96 @@ def execute_node(state: AgentState) -> dict[str, Any]:
         return {"tasks": tasks, "messages": [response]}
 
 
+def _worker_task_result(
+    *,
+    state: TaskWorkerState,
+    task: AgentTask,
+    messages: list[Any],
+) -> AgentTaskResult:
+    return AgentTaskResult(
+        task_id=str(task.get("task_id", "")),
+        task_index=int(state.get("source_task_index", state.get("current_task_index", 0))),
+        request_id=str(state.get("request_id", "")),
+        status=task.get("status", "done"),
+        messages=messages,
+        pending_mutations=list(state.get("worker_pending_mutations", [])),
+    )
+
+
+def execute_task_node(state: TaskWorkerState) -> dict[str, Any]:
+    """Execute one Send-dispatched task while keeping task-local state isolated."""
+    settings = get_settings()
+    current_idx = state.get("current_task_index", 0)
+    tasks = list(state.get("tasks", []))
+    task = tasks[current_idx]
+
+    if settings.enable_mock_llm:
+        response = AIMessage(
+            content=f"（Mock 回复）收到您的消息，当前任务类型已识别。",
+        )
+        task_messages = list(task.get("task_message", []))
+        updated_messages = task_messages + [response]
+        updated_task = AgentTask(
+            **{**task, "task_message": updated_messages, "status": "done"}
+        )
+        tasks[current_idx] = updated_task
+        return {
+            "tasks": tasks,
+            "task_results": [
+                _worker_task_result(
+                    state=state,
+                    task=updated_task,
+                    messages=[response],
+                )
+            ],
+        }
+
+    tools = [t for t in DOCUMENT_TOOLS if t.name in task.get("task_tools", [])]
+
+    llm = ChatOpenAI(
+        api_key=settings.llm_api_key,
+        base_url=settings.llm_base_url,
+        model=settings.llm_model,
+        temperature=settings.llm_temperature,
+    )
+    if tools:
+        llm = llm.bind_tools(tools)
+
+    task_messages = list(task.get("task_message", []))
+    conversation_messages = list(state.get("conversation_messages", []))
+    messages = _build_execute_messages(
+        system_prompt=task["task_prompt"],
+        conversation_messages=conversation_messages,
+        task_messages=task_messages,
+    )
+
+    response = llm.invoke(messages)
+    updated_messages = task_messages + [response]
+    tasks[current_idx] = {**task, "task_message": updated_messages}
+
+    if getattr(response, "tool_calls", None):
+        tasks[current_idx] = {**tasks[current_idx], "status": "running"}
+        return {"tasks": tasks}
+
+    tasks[current_idx] = {**tasks[current_idx], "status": "done"}
+    return {
+        "tasks": tasks,
+        "task_results": [
+            _worker_task_result(
+                state=state,
+                task=tasks[current_idx],
+                messages=[response],
+            )
+        ],
+    }
+
+
 # ── Custom Tools Node ────────────────────────────────────────────────────
 
 
 def _apply_canvas_context_tool_result(
     *,
-    state: AgentState,
+    state: dict[str, Any],
     task: AgentTask,
     result_str: str,
 ) -> AgentTask:
@@ -472,13 +582,7 @@ def _apply_canvas_context_tool_result(
     )
 
 
-def tools_node(state: AgentState) -> dict[str, Any]:
-    """Execute tool calls for the current task and append results to task_message.
-
-    When ``update_canvas_element`` is invoked, captures the mutation args into
-    ``pending_mutations`` so that ``stream_agent_events`` can relay them to the
-    frontend as ``dom_mutation`` SSE events.
-    """
+def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask], list[dict]]:
     current_idx = state["current_task_index"]
     tasks = list(state["tasks"])
     task = tasks[current_idx]
@@ -534,7 +638,24 @@ def tools_node(state: AgentState) -> dict[str, Any]:
                 })
 
     tasks[current_idx] = {**task, "task_message": task_messages + tool_results}
+    return tasks, pending_mutations
+
+
+def tools_node(state: AgentState) -> dict[str, Any]:
+    """Execute tool calls for the current task and append results to task_message.
+
+    When ``update_canvas_element`` is invoked, captures the mutation args into
+    ``pending_mutations`` so that ``stream_agent_events`` can relay them to the
+    frontend as ``dom_mutation`` SSE events.
+    """
+    tasks, pending_mutations = _run_tools_for_current_task(state)
     return {"tasks": tasks, "pending_mutations": pending_mutations}
+
+
+def worker_tools_node(state: TaskWorkerState) -> dict[str, Any]:
+    """Execute tool calls inside one Send branch without writing parent state."""
+    tasks, pending_mutations = _run_tools_for_current_task(state)
+    return {"tasks": tasks, "worker_pending_mutations": pending_mutations}
 
 
 # ── Task Advance Node ────────────────────────────────────────────────────
@@ -566,30 +687,103 @@ def router_task_advance(state: AgentState) -> str:
     return END
 
 
+def router_execute_task(state: TaskWorkerState) -> str:
+    """From a worker execute node: route to tools while the active task requests tools."""
+    current_idx = state.get("current_task_index", 0)
+    tasks = state.get("tasks", [])
+    if not tasks:
+        return END
+    task = tasks[current_idx]
+    msgs = task.get("task_message", [])
+    if msgs and getattr(msgs[-1], "tool_calls", None):
+        return "tools"
+    return END
+
+
+def route_tasks(state: AgentState) -> list[Send] | str:
+    """Fan out assembled tasks to isolated worker subgraphs."""
+    tasks = list(state.get("tasks", []))
+    if not tasks:
+        return "reduce"
+
+    return [
+        Send(
+            "task_worker",
+            {
+                "tasks": [task],
+                "current_task_index": 0,
+                "source_task_index": index,
+                "conversation_messages": list(state.get("messages", [])),
+                "user_input": state.get("user_input", ""),
+                "canvas_snapshot": state.get("canvas_snapshot", ""),
+                "focus_element_id": state.get("focus_element_id"),
+                "focus_block_id": state.get("focus_block_id"),
+                "task_type": state.get("task_type", "general_chat"),
+                "task_reason": state.get("task_reason", ""),
+                "worker_pending_mutations": [],
+                "task_results": [],
+                "session_id": state.get("session_id", ""),
+                "conversation_id": state.get("conversation_id", ""),
+                "request_id": state.get("request_id", ""),
+            },
+        )
+        for index, task in enumerate(tasks)
+    ]
+
+
+def reduce_node(state: AgentState) -> dict[str, Any]:
+    """Collect task worker outputs in document/task order for frontend streaming."""
+    request_id = str(state.get("request_id", ""))
+    all_results = list(state.get("task_results", []))
+    if request_id:
+        all_results = [
+            result
+            for result in all_results
+            if str(result.get("request_id", "")) == request_id
+        ]
+    results = sorted(
+        all_results,
+        key=lambda result: int(result.get("task_index", 0)),
+    )
+
+    messages: list[Any] = []
+    pending_mutations: list[dict] = []
+    for result in results:
+        messages.extend(list(result.get("messages", [])))
+        pending_mutations.extend(list(result.get("pending_mutations", [])))
+
+    return {"messages": messages, "pending_mutations": pending_mutations}
+
+
 # ── Graph Definition ─────────────────────────────────────────────────────
+
+worker_builder = StateGraph(TaskWorkerState, output=TaskWorkerOutputState)
+worker_builder.add_node("execute", execute_task_node)
+worker_builder.add_node("tools", worker_tools_node)
+worker_builder.add_edge(START, "execute")
+worker_builder.add_edge("tools", "execute")
+worker_builder.add_conditional_edges(
+    "execute",
+    router_execute_task,
+    {"tools": "tools", END: END},
+)
+task_worker_graph = worker_builder.compile()
+
 
 builder = StateGraph(AgentState)
 builder.add_node("intent", intent_node)
 builder.add_node("task_assemble", task_assemble_node)
-builder.add_node("execute", execute_node)
-builder.add_node("tools", tools_node)
-builder.add_node("task_advance", task_advance_node)
+builder.add_node("task_worker", task_worker_graph)
+builder.add_node("reduce", reduce_node)
 
 builder.add_edge(START, "intent")
 builder.add_edge("intent", "task_assemble")
-builder.add_edge("task_assemble", "execute")
-builder.add_edge("tools", "execute")
+builder.add_conditional_edges("task_assemble", route_tasks, ["task_worker", "reduce"])
+builder.add_edge("task_worker", "reduce")
+builder.add_edge("reduce", END)
 
-builder.add_conditional_edges(
-    "execute",
-    router_execute,
-    {"tools": "tools", "task_advance": "task_advance"},
-)
-builder.add_conditional_edges(
-    "task_advance",
-    router_task_advance,
-    {"execute": "execute", END: END},
-)
+# Legacy serial nodes remain importable for direct unit tests, but they are no
+# longer attached to the main graph.
 
 def compile_agent_graph(checkpointer: Any | None = None) -> Any:
     return builder.compile(checkpointer=checkpointer)
@@ -716,6 +910,21 @@ async def stream_agent_events(
                 "event": "node_end",
                 "data": {"node": "task_assemble", "output": output},
             }
+        elif kind == "on_chain_start" and name == "reduce":
+            yield {"event": "node_start", "data": {"node": "reduce"}}
+        elif kind == "on_chain_end" and name == "reduce":
+            raw = event.get("data", {}).get("output", {})
+            output = _sanitize_output(raw)
+            yield {
+                "event": "node_end",
+                "data": {"node": "reduce", "output": output},
+            }
+            for msg in raw.get("messages", []):
+                content = getattr(msg, "content", "") or ""
+                if content:
+                    yield {"event": "chat_chunk", "data": {"content": content, "done": True}}
+            for mutation in raw.get("pending_mutations", []):
+                yield {"event": "dom_mutation", "data": mutation}
         elif kind == "on_chain_start" and name == "execute":
             yield {"event": "node_start", "data": {"node": "execute"}}
         elif kind == "on_chain_end" and name == "execute":

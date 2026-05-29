@@ -20,14 +20,6 @@ TEXT_SNIPPET_LIMIT = 900
 OUTLINE_LIMIT = 30
 
 
-class CanvasMutationArgs(BaseModel):
-    element_id: str = Field(description="前端文档中需要操作的 DOM 节点 id")
-    action_type: Literal["replace", "append", "insert", "delete"] = Field(
-        description="文档操作类型：replace/append/insert/delete"
-    )
-    new_html: str = Field(default="", description="新的 HTML 片段，delete 时可以为空")
-
-
 class DownloadLinkArgs(BaseModel):
     export_format: Literal["markdown", "html", "pdf"] = Field(description="导出格式")
     content: str = Field(default="", description="需要导出的文档内容")
@@ -233,13 +225,48 @@ def canvas_read_after(
     return _json_result(result)
 
 
-@tool(args_schema=CanvasMutationArgs)
-def update_canvas_element(element_id: str, action_type: str, new_html: str = "") -> str:
+@tool
+def update_canvas_element(
+    element_id: Annotated[
+        str,
+        "前端文档中需要操作的 DOM 节点 id。必须与 canvas_context 中的 DOM id 完全一致。",
+    ],
+    action_type: Annotated[
+        Literal["replace", "append", "insert", "delete"],
+        "文档操作类型：replace/append/insert/delete",
+    ],
+    new_html: Annotated[str, "新的 HTML 片段，delete 时可以为空"] = "",
+    state: Annotated[dict[str, Any], InjectedState] = None,
+) -> str:
     """Dispatch a structured document mutation to the browser canvas."""
 
-    return (
-        f"文档修改指令已派发至前端：element_id={element_id}, "
-        f"action_type={action_type}。"
+    state = state or {}
+    valid_element_ids = {
+        block.block_id
+        for block in _extract_moss_blocks(str(state.get("canvas_snapshot") or ""))
+    }
+
+    if not element_id or element_id not in valid_element_ids:
+        return _json_result(
+            {
+                "ok": False,
+                "operation": "update_canvas_element",
+                "error": "element_id_not_found",
+                "element_id": element_id,
+                "action_type": action_type,
+                "message": "element_id does not exist in current canvas_snapshot.",
+                "hint": "Use the exact DOM id shown in the canvas_context DOM id field. Do not construct IDs from position numbers.",
+            }
+        )
+
+    return _json_result(
+        {
+            "ok": True,
+            "operation": "update_canvas_element",
+            "element_id": element_id,
+            "action_type": action_type,
+            "new_html": new_html,
+        }
     )
 
 

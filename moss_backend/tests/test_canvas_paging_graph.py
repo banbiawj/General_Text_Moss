@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import json
 
 from langchain_core.messages import AIMessage
 
@@ -128,6 +129,52 @@ class CanvasPagingGraphTests(unittest.TestCase):
             "moss-block-3",
             "moss-block-4",
         ])
+
+    def test_tools_node_rejects_update_canvas_element_for_missing_element_id(self) -> None:
+        task = {
+            "task_message": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "update_canvas_element",
+                            "args": {
+                                "element_id": "moss-block-53",
+                                "action_type": "replace",
+                                "new_html": '<p id="moss-block-53">wrong</p>',
+                            },
+                            "id": "call-update-missing",
+                            "type": "tool_call",
+                        }
+                    ],
+                )
+            ],
+            "canvas_context_blocks": [],
+            "canvas_context_operation_seq": 0,
+            "task_tools": ["update_canvas_element"],
+            "task_prompt": "",
+        }
+        state = {
+            "messages": [],
+            "user_input": "Rewrite this",
+            "canvas_snapshot": '<p id="moss-block-real">real</p>',
+            "focus_element_id": "moss-block-real",
+            "focus_block_id": "moss-block-real",
+            "task_type": "global_edit",
+            "task_reason": "",
+            "current_task_index": 0,
+            "pending_mutations": [],
+            "tasks": [task],
+        }
+
+        result = tools_node(state)
+
+        self.assertEqual(result["pending_mutations"], [])
+        tool_message = result["tasks"][0]["task_message"][-1]
+        payload = json.loads(tool_message.content)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"], "element_id_not_found")
+        self.assertEqual(payload["element_id"], "moss-block-53")
 
     def test_document_qa_prompt_exposes_paging_tools(self) -> None:
         state = {

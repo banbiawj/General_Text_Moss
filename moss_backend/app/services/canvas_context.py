@@ -164,7 +164,7 @@ def render_canvas_context(context_blocks: list[dict[str, Any]]) -> str:
         heading_path = block.get("heading_path") or []
         heading_suffix = f" | {' / '.join(heading_path)}" if heading_path else ""
         lines.append(
-            f"[Block {index} | id={block['block_id']} | tag={block.get('tag', 'unknown')}{heading_suffix}]"
+            f"[DOM id: {block['block_id']} | position: {index} | tag: {block.get('tag', 'unknown')}{heading_suffix}]"
         )
         lines.append(str(block.get("html") or block.get("text") or ""))
         lines.append("")

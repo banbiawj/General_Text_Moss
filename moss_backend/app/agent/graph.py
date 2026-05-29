@@ -70,6 +70,7 @@ STATEFUL_DOCUMENT_TOOL_NAMES = {
     "search_document_blocks",
     "canvas_read_before",
     "canvas_read_after",
+    "update_canvas_element",
 }
 
 
@@ -519,13 +520,18 @@ def tools_node(state: AgentState) -> dict[str, Any]:
             ToolMessage(content=result_str, tool_call_id=tool_call["id"])
         )
 
-        # Capture DOM mutations from update_canvas_element calls
+        # Capture DOM mutations only after update_canvas_element validates the target.
         if tool_call["name"] == "update_canvas_element":
-            pending_mutations.append({
-                "element_id": tool_call["args"].get("element_id", ""),
-                "action_type": tool_call["args"].get("action_type", ""),
-                "new_html": tool_call["args"].get("new_html", ""),
-            })
+            try:
+                mutation_payload = json.loads(result_str)
+            except json.JSONDecodeError:
+                mutation_payload = {}
+            if isinstance(mutation_payload, dict) and mutation_payload.get("ok") is True:
+                pending_mutations.append({
+                    "element_id": tool_call["args"].get("element_id", ""),
+                    "action_type": tool_call["args"].get("action_type", ""),
+                    "new_html": tool_call["args"].get("new_html", ""),
+                })
 
     tasks[current_idx] = {**task, "task_message": task_messages + tool_results}
     return {"tasks": tasks, "pending_mutations": pending_mutations}

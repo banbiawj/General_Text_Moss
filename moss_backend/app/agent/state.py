@@ -42,6 +42,9 @@ class AgentTask(TypedDict, total=False):
     # update_canvas_element 必须校验 element_id 在这里。
     allowed_element_ids: list[str]
 
+    # 本任务的工具预算使用量。键是预算组名，值是已经消耗的次数。
+    tool_budget_usage: dict[str, int]
+
     # 任务状态，用于推进任务列表。
     status: TaskStatus
 

@@ -176,6 +176,128 @@ class CanvasPagingGraphTests(unittest.TestCase):
         self.assertEqual(payload["error"], "element_id_not_found")
         self.assertEqual(payload["element_id"], "moss-block-53")
 
+    def test_global_edit_context_reads_share_one_budget(self) -> None:
+        initial_state = {
+            "messages": [],
+            "user_input": "Polish the whole document",
+            "canvas_snapshot": _snapshot(5),
+            "focus_element_id": "moss-block-1",
+            "focus_block_id": "moss-block-1",
+            "task_type": "global_edit",
+            "task_reason": "",
+            "current_task_index": 0,
+            "pending_mutations": [],
+        }
+        task = task_assemble_node(initial_state)["tasks"][0]
+        task["canvas_context_blocks"] = [
+            block
+            for block in task["canvas_context_blocks"]
+            if block["block_id"] in {"moss-block-1", "moss-block-2"}
+        ]
+        task["canvas_context"] = '<p id="moss-block-1">block 1</p><p id="moss-block-2">block 2</p>'
+        task["task_message"] = [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "canvas_read_after",
+                        "args": {"block_count": 1},
+                        "id": "call-read-after",
+                        "type": "tool_call",
+                    },
+                    {
+                        "name": "canvas_read_before",
+                        "args": {"block_count": 1},
+                        "id": "call-read-before",
+                        "type": "tool_call",
+                    },
+                ],
+            )
+        ]
+
+        result = tools_node({**initial_state, "tasks": [task]})
+        updated_task = result["tasks"][0]
+        first_payload = json.loads(updated_task["task_message"][-2].content)
+        second_payload = json.loads(updated_task["task_message"][-1].content)
+
+        self.assertNotEqual(first_payload.get("error"), "tool_budget_exceeded")
+        self.assertEqual(second_payload["error"], "tool_budget_exceeded")
+        self.assertEqual(second_payload["budget_group"], "context_read")
+        self.assertEqual(second_payload["tool"], "canvas_read_before")
+        self.assertEqual(updated_task["tool_budget_usage"], {"context_read": 1})
+        self.assertEqual(
+            [block["block_id"] for block in updated_task["canvas_context_blocks"]],
+            ["moss-block-1", "moss-block-2", "moss-block-3"],
+        )
+
+    def test_local_edit_context_reads_are_not_limited_by_global_edit_budget(self) -> None:
+        initial_state = {
+            "messages": [],
+            "user_input": "Polish around here",
+            "canvas_snapshot": _snapshot(5),
+            "focus_element_id": "moss-block-2",
+            "focus_block_id": "moss-block-2",
+            "task_type": "local_edit",
+            "task_reason": "",
+            "current_task_index": 0,
+            "pending_mutations": [],
+        }
+        task = task_assemble_node(initial_state)["tasks"][0]
+        task["canvas_context_blocks"] = [
+            block
+            for block in task["canvas_context_blocks"]
+            if block["block_id"] == "moss-block-2"
+        ]
+        task["canvas_context"] = '<p id="moss-block-2">block 2</p>'
+        task["task_message"] = [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "canvas_read_after",
+                        "args": {"block_count": 1},
+                        "id": "call-read-after",
+                        "type": "tool_call",
+                    },
+                    {
+                        "name": "canvas_read_before",
+                        "args": {"block_count": 1},
+                        "id": "call-read-before",
+                        "type": "tool_call",
+                    },
+                ],
+            )
+        ]
+
+        result = tools_node({**initial_state, "tasks": [task]})
+        updated_task = result["tasks"][0]
+        payloads = [
+            json.loads(message.content)
+            for message in updated_task["task_message"][-2:]
+        ]
+
+        self.assertTrue(all(payload.get("error") != "tool_budget_exceeded" for payload in payloads))
+        self.assertEqual(updated_task["tool_budget_usage"], {})
+        self.assertEqual(
+            [block["block_id"] for block in updated_task["canvas_context_blocks"]],
+            ["moss-block-1", "moss-block-2", "moss-block-3"],
+        )
+
+    def test_global_edit_prompt_exposes_context_read_budget(self) -> None:
+        task = task_assemble_node(
+            {
+                "task_type": "global_edit",
+                "canvas_snapshot": _snapshot(3),
+                "focus_block_id": "moss-block-1",
+                "focus_element_id": "moss-block-1",
+                "user_input": "Polish the whole document",
+            }
+        )["tasks"][0]
+
+        self.assertIn("canvas_read_before", task["task_prompt"])
+        self.assertIn("canvas_read_after", task["task_prompt"])
+        self.assertIn("合计最多只能使用 1 次", task["task_prompt"])
+
     def test_document_qa_prompt_exposes_paging_tools(self) -> None:
         state = {
             "task_type": "document_qa",

@@ -64,7 +64,21 @@ TASK_TYPE_TOOLS: dict[TaskType, list[str]] = {
         "canvas_read_after",
         "update_canvas_element",
     ],
-    "global_edit": ["update_canvas_element"],
+    "global_edit": ["canvas_read_before", "canvas_read_after", "update_canvas_element"],
+}
+
+
+TASK_TYPE_TOOL_BUDGETS: dict[TaskType, dict[str, dict[str, Any]] | None] = {
+    "general_chat": None,
+    "document_qa": None,
+    "local_edit": None,
+    "global_edit": {
+        "context_read": {
+            "tools": ["canvas_read_before", "canvas_read_after"],
+            "limit": 1,
+            "message": "全局编辑任务的上下文翻阅次数已用完。请基于当前 chunk 继续完成修改，不要继续调用翻阅工具。",
+        }
+    },
 }
 
 
@@ -366,6 +380,7 @@ def task_assemble_node(state: AgentState) -> dict[str, Any]:
             task_prompt=task_prompt,
             task_tools=task_tools,
             allowed_element_ids=[],
+            tool_budget_usage={},
             status="pending",
         )
         tasks.append(task)
@@ -582,6 +597,73 @@ def _apply_canvas_context_tool_result(
     )
 
 
+def _tool_budget_config(
+    *,
+    task_type: TaskType,
+    tool_name: str,
+) -> tuple[str, dict[str, Any]] | None:
+    budgets = TASK_TYPE_TOOL_BUDGETS.get(task_type)
+    if not budgets:
+        return None
+
+    for group_name, group_config in budgets.items():
+        if tool_name in set(group_config.get("tools", [])):
+            return group_name, group_config
+    return None
+
+
+def _tool_budget_exceeded_result(
+    *,
+    group_name: str,
+    tool_name: str,
+    limit: int,
+    used: int,
+    message: str,
+) -> str:
+    return json.dumps(
+        {
+            "ok": False,
+            "error": "tool_budget_exceeded",
+            "budget_group": group_name,
+            "tool": tool_name,
+            "limit": limit,
+            "used": used,
+            "message": message,
+        },
+        ensure_ascii=False,
+    )
+
+
+def _consume_tool_budget(
+    *,
+    state: dict[str, Any],
+    task: AgentTask,
+    tool_name: str,
+) -> tuple[AgentTask, str | None]:
+    task_type: TaskType = state.get("task_type", "general_chat")
+    budget_config = _tool_budget_config(task_type=task_type, tool_name=tool_name)
+    if budget_config is None:
+        return task, None
+
+    group_name, group = budget_config
+    usage = dict(task.get("tool_budget_usage", {}))
+    used = int(usage.get(group_name, 0))
+    limit = int(group.get("limit", 0))
+    message = str(group.get("message", "Tool budget exceeded."))
+
+    if used >= limit:
+        return task, _tool_budget_exceeded_result(
+            group_name=group_name,
+            tool_name=tool_name,
+            limit=limit,
+            used=used,
+            message=message,
+        )
+
+    usage[group_name] = used + 1
+    return AgentTask(**{**task, "tool_budget_usage": usage}), None
+
+
 def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask], list[dict]]:
     current_idx = state["current_task_index"]
     tasks = list(state["tasks"])
@@ -607,6 +689,18 @@ def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask],
             continue
 
         try:
+            task, budget_result = _consume_tool_budget(
+                state=state,
+                task=task,
+                tool_name=tool_call["name"],
+            )
+            if budget_result is not None:
+                result_str = budget_result
+                tool_results.append(
+                    ToolMessage(content=result_str, tool_call_id=tool_call["id"])
+                )
+                continue
+
             args = dict(tool_call["args"])
             if tool_call["name"] in STATEFUL_DOCUMENT_TOOL_NAMES:
                 args["state"] = state

@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MossLog</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --text: #334155;
+      --muted: #64748b;
+      --line: #e2e8f0;
+
+      --llm-main: #3b82f6;
+      --llm-head: #eff6ff;
+      --llm-body: #fbfdff;
+
+      --tool-main: #10b981;
+      --tool-head: #ecfdf5;
+      --tool-body: #f8fffc;
+
+      --node-main: #8b5cf6;
+      --node-head: #f5f3ff;
+      --node-body: #fcfbff;
+
+      --debug-main: #f59e0b;
+      --debug-head: #fffbeb;
+      --debug-body: #fffefe;
+
+      --error-main: #ef4444;
+      --error-head: #fef2f2;
+      --error-body: #fffcfc;
+
+      --neutral-main: #64748b;
+      --neutral-head: #f1f5f9;
+      --neutral-body: #ffffff;
+
+      --code-bg: #1e293b;
+      --code-text: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      letter-spacing: 0;
+    }
+
+    button { font: inherit; border: none; cursor: pointer; }
+
+    button:focus-visible,
+    summary:focus-visible {
+      outline: 2px solid #0f172a;
+      outline-offset: 2px;
+    }
+
+    .page {
+      width: min(1120px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 42px;
+    }
+
+    .title { margin-bottom: 20px; }
+    h1 { margin: 0; font-size: 28px; font-weight: 700; color: #0f172a; }
+    .subtitle { margin-top: 6px; color: var(--muted); font-size: 14px; }
+
+    .status { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 99px;
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; }
+    .dot.disconnected { background: #ef4444; }
+    .dot.paused { background: #f59e0b; }
+
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .filters { display: flex; flex-wrap: wrap; gap: 6px; }
+    .filter {
+      padding: 6px 14px;
+      border-radius: 6px;
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+    .filter.active { background: #0f172a; color: #fff; border-color: #0f172a; }
+    .actions { display: flex; gap: 8px; }
+    .icon-button {
+      width: 34px;
+      height: 32px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 6px;
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--text);
+      padding: 0;
+    }
+    .icon {
+      width: 16px;
+      height: 16px;
+      display: block;
+      pointer-events: none;
+    }
+
+    .events { display: flex; flex-direction: column; gap: 12px; }
+
+    details {
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid transparent;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+      transition: box-shadow 0.2s;
+    }
+    details[open] { box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+
+    summary {
+      list-style: none;
+      padding: 10px 16px;
+      display: grid;
+      grid-template-columns: 80px 70px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      user-select: none;
+    }
+    summary::-webkit-details-marker { display: none; }
+
+    .time { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+    .tag {
+      padding: 4px 0;
+      border-radius: 4px;
+      color: white;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      text-align: center;
+      letter-spacing: 0.5px;
+    }
+    .message {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1e293b;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .meta { color: var(--muted); font-size: 13px; white-space: nowrap; }
+
+    details.llm { background: var(--llm-body); border-color: #bfdbfe; }
+    details.llm summary { background: var(--llm-head); }
+    details.llm .tag { background: var(--llm-main); }
+
+    details.tool { background: var(--tool-body); border-color: #a7f3d0; }
+    details.tool summary { background: var(--tool-head); }
+    details.tool .tag { background: var(--tool-main); }
+
+    details.node { background: var(--node-body); border-color: #ddd6fe; }
+    details.node summary { background: var(--node-head); }
+    details.node .tag { background: var(--node-main); }
+
+    details.debug { background: var(--debug-body); border-color: #fde68a; }
+    details.debug summary { background: var(--debug-head); }
+    details.debug .tag { background: var(--debug-main); }
+
+    details.error { background: var(--error-body); border-color: #fecaca; }
+    details.error summary { background: var(--error-head); }
+    details.error .tag { background: var(--error-main); }
+
+    details.neutral { background: var(--neutral-body); border-color: #cbd5e1; }
+    details.neutral summary { background: var(--neutral-head); }
+    details.neutral .tag { background: var(--neutral-main); }
+
+    .body { padding: 16px; border-top: 1px solid rgba(0,0,0,0.04); }
+    .io-view { margin-bottom: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .chat-block {
+      background: rgba(255, 255, 255, 0.72);
+      border-radius: 6px;
+      overflow: hidden;
+      box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.16);
+    }
+    .chat-role {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 6px 12px;
+      background: #f1f5f9;
+      color: var(--muted);
+      border-bottom: 1px solid var(--line);
+    }
+    .chat-content {
+      padding: 12px;
+      font-size: 14px;
+      line-height: 1.6;
+      color: #334155;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .chat-tool-call {
+      padding: 10px 12px;
+      background: #f8fafc;
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 13px;
+      color: #0f172a;
+      border-top: 1px dashed var(--line);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .message-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .message-card {
+      border-radius: 6px;
+      background: #fff;
+      box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.22);
+      overflow: hidden;
+    }
+    .message-card.system { background: #f8fafc; }
+    .message-card.user { background: #eff6ff; }
+    .message-card.assistant { background: #ecfdf5; }
+    .message-card.tool { background: #f5f3ff; }
+    .message-card.error { background: #fef2f2; }
+    .message-card.other { background: #ffffff; }
+    .message-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      color: #475569;
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+    }
+    .message-name {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: none;
+    }
+    .message-content {
+      max-height: 260px;
+      overflow: auto;
+      padding: 10px;
+      color: #334155;
+      font-size: 14px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .raw-data {
+      margin-top: 4px;
+      border-radius: 6px;
+      border-color: rgba(148, 163, 184, 0.18);
+      background: rgba(255, 255, 255, 0.72);
+      box-shadow: none;
+    }
+    .raw-data[open] { box-shadow: none; }
+    .raw-data summary {
+      display: flex;
+      grid-template-columns: none;
+      min-height: 34px;
+      padding: 8px 10px;
+      background: rgba(241, 245, 249, 0.74);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .raw-data pre { border-radius: 0; }
+    pre {
+      margin: 0;
+      padding: 14px;
+      border-radius: 6px;
+      background: var(--code-bg);
+      color: var(--code-text);
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      overflow-x: auto;
+    }
+
+    .empty {
+      padding: 28px 16px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      background: #fff;
+      text-align: center;
+    }
+
+    @media (max-width: 720px) {
+      .page { width: min(1120px, calc(100vw - 20px)); padding-top: 18px; }
+      .toolbar { align-items: flex-start; flex-direction: column; }
+      summary { grid-template-columns: 1fr; gap: 6px; padding: 12px; }
+      .message { white-space: normal; }
+      .meta { white-space: normal; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="title">
+      <h1>MossLog</h1>
+      <div class="subtitle">Local debug logs - SSE live stream - memory only</div>
+    </header>
+
+    <section class="status">
+      <span class="pill"><span class="dot" id="status-dot"></span><span id="connection-status">connecting</span></span>
+      <span class="pill"><span id="event-count">0</span> events</span>
+      <span class="pill">buffer <span id="buffer-size">1000</span></span>
+    </section>
+
+    <section class="toolbar">
+      <div class="filters" id="filters">
+        <button class="filter active" data-filter="all">ALL</button>
+        <button class="filter" data-filter="llm">LLM</button>
+        <button class="filter" data-filter="tool">TOOL</button>
+        <button class="filter" data-filter="node">NODE</button>
+        <button class="filter" data-filter="debug">DEBUG</button>
+        <button class="filter" data-filter="error">ERROR</button>
+      </div>
+      <div class="actions">
+        <button class="icon-button" id="pause-button" aria-label="Pause visible updates" title="Pause visible updates" type="button">
+          <svg class="icon" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="4" width="4" height="16" rx="1"></rect>
+            <rect x="14" y="4" width="4" height="16" rx="1"></rect>
+          </svg>
+        </button>
+        <button class="icon-button" id="clear-button" aria-label="Clear events" title="Clear events" type="button">
+          <svg class="icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 6h18"></path>
+            <path d="M8 6V4h8v2"></path>
+            <path d="M19 6l-1 14H6L5 6"></path>
+            <path d="M10 11v6"></path>
+            <path d="M14 11v6"></path>
+          </svg>
+        </button>
+      </div>
+    </section>
+
+    <section class="events" id="events">
+      <div class="empty">Waiting for mosslog events.</div>
+    </section>
+
+    <template id="raw-data-template">
+      <details class="raw-data">
+        <summary>Raw Payload</summary>
+      </details>
+    </template>
+  </main>
+
+  <script>
+    let events = [];
+    let pendingEvents = [];
+    let activeFilter = "all";
+    let paused = false;
+    let source = null;
+
+    const eventsEl = document.getElementById("events");
+    const eventCountEl = document.getElementById("event-count");
+    const bufferSizeEl = document.getElementById("buffer-size");
+    const connectionStatusEl = document.getElementById("connection-status");
+    const statusDotEl = document.getElementById("status-dot");
+    const pauseButtonEl = document.getElementById("pause-button");
+    const clearButtonEl = document.getElementById("clear-button");
+    const filtersEl = document.getElementById("filters");
+    const pauseIcon = `
+      <svg class="icon" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
+        <rect x="6" y="4" width="4" height="16" rx="1"></rect>
+        <rect x="14" y="4" width="4" height="16" rx="1"></rect>
+      </svg>
+    `;
+    const resumeIcon = `
+      <svg class="icon" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M7 5v14l11-7z"></path>
+      </svg>
+    `;
+
+    function setConnectionStatus(label, className) {
+      connectionStatusEl.textContent = label;
+      statusDotEl.className = "dot";
+      if (className) {
+        statusDotEl.classList.add(className);
+      }
+    }
+
+    function setPauseButtonState(isPaused) {
+      pauseButtonEl.innerHTML = isPaused ? resumeIcon : pauseIcon;
+      pauseButtonEl.title = isPaused ? "Resume visible updates" : "Pause visible updates";
+      pauseButtonEl.setAttribute("aria-label", pauseButtonEl.title);
+    }
+
+    function normalizeTag(tag) {
+      const normalized = String(tag || "debug").toLowerCase();
+      if (["llm", "tool", "node", "debug", "error"].includes(normalized)) {
+        return normalized;
+      }
+      return "neutral";
+    }
+
+    function formatValue(value) {
+      if (value === null || value === undefined) {
+        return "";
+      }
+      if (typeof value === "string") {
+        return formatReadableText(value);
+      }
+      return JSON.stringify(value, null, 2);
+    }
+
+    function formatReadableText(value) {
+      return String(value)
+        .replace(/\\n/g, "\n")
+        .replace(/\\t/g, "\t")
+        .replace(/\\"/g, '"');
+    }
+
+    function isMessageList(value) {
+      return Array.isArray(value) && value.length > 0 && value.every((item) => {
+        return item && typeof item === "object" && "role" in item && "content" in item;
+      });
+    }
+
+    function messageRoleClass(role) {
+      const normalized = String(role || "other").toLowerCase();
+      if (["system", "user", "assistant", "tool", "error"].includes(normalized)) {
+        return normalized;
+      }
+      return "other";
+    }
+
+    function createMessageCards(messages) {
+      const list = document.createElement("div");
+      list.className = "message-list";
+
+      for (const message of messages) {
+        const roleClass = messageRoleClass(message.role);
+        const card = document.createElement("div");
+        card.className = `message-card ${roleClass}`;
+
+        const header = document.createElement("div");
+        header.className = "message-header";
+
+        const role = document.createElement("span");
+        role.textContent = String(message.role || "message");
+        header.appendChild(role);
+
+        if (message.name || message.tool_call_id) {
+          const name = document.createElement("span");
+          name.className = "message-name";
+          name.textContent = String(message.name || message.tool_call_id);
+          header.appendChild(name);
+        }
+
+        const content = document.createElement("div");
+        content.className = "message-content";
+        content.textContent = formatValue(message.content);
+
+        card.append(header, content);
+        list.appendChild(card);
+      }
+
+      return list;
+    }
+
+    function compactValue(value) {
+      const text = formatValue(value).replace(/\s+/g, " ").trim();
+      return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+    }
+
+    function appendText(parent, text) {
+      parent.textContent = text;
+      return parent;
+    }
+
+    function createBlock(role, content, className) {
+      const block = document.createElement("div");
+      block.className = className || "chat-block";
+
+      const roleEl = document.createElement("div");
+      roleEl.className = "chat-role";
+      roleEl.textContent = role;
+
+      const contentEl = document.createElement("div");
+      contentEl.className = "chat-content";
+      if (isMessageList(content)) {
+        contentEl.appendChild(createMessageCards(content));
+      } else {
+        contentEl.textContent = formatValue(content);
+      }
+
+      block.append(roleEl, contentEl);
+      return block;
+    }
+
+    function createToolCallBlock(value) {
+      const block = document.createElement("div");
+      block.className = "chat-block";
+
+      const roleEl = document.createElement("div");
+      roleEl.className = "chat-role";
+      roleEl.textContent = "Tool Call";
+
+      const callEl = document.createElement("div");
+      callEl.className = "chat-tool-call";
+      callEl.textContent = formatValue(value);
+
+      block.append(roleEl, callEl);
+      return block;
+    }
+
+    function createIoView(event) {
+      const fields = event.fields || {};
+      const ioView = document.createElement("div");
+      ioView.className = "io-view";
+
+      if (fields.input !== undefined) {
+        ioView.appendChild(createBlock(event.tag === "llm" ? "User / Input" : "Input", fields.input));
+      }
+
+      if (fields.task_type !== undefined || fields.reason !== undefined) {
+        ioView.appendChild(createBlock("Intent", {
+          task_type: fields.task_type,
+          reason: fields.reason,
+        }));
+      }
+
+      if (fields.prompt !== undefined) {
+        ioView.appendChild(createBlock("Prompt", fields.prompt));
+      }
+
+      if (fields.output !== undefined) {
+        ioView.appendChild(createBlock(event.tag === "llm" ? "Assistant / Output" : "Output", fields.output));
+      }
+
+      if (fields.response !== undefined) {
+        ioView.appendChild(createBlock(event.tag === "llm" ? "Assistant / Response" : "Response", fields.response));
+      }
+
+      if (fields.tool_call !== undefined) {
+        ioView.appendChild(createToolCallBlock(fields.tool_call));
+      }
+
+      if (fields.tool_calls !== undefined) {
+        ioView.appendChild(createToolCallBlock(fields.tool_calls));
+      }
+
+      if (fields.mutations !== undefined) {
+        ioView.appendChild(createBlock("Mutations", fields.mutations));
+      }
+
+      if (fields.error !== undefined) {
+        ioView.appendChild(createBlock("Error", fields.error));
+      }
+
+      if (!ioView.childElementCount) {
+        ioView.appendChild(createBlock("Message", event.message));
+      }
+
+      return ioView;
+    }
+
+    function createRawData(event) {
+      const raw = document.createElement("details");
+      raw.className = "raw-data";
+
+      const summary = document.createElement("summary");
+      summary.textContent = "Raw Payload";
+
+      const pre = document.createElement("pre");
+      pre.textContent = JSON.stringify(event, null, 2);
+
+      raw.append(summary, pre);
+      return raw;
+    }
+
+    function eventMeta(event) {
+      const fields = event.fields || {};
+      const parts = [];
+      if (fields.model) parts.push(fields.model);
+      if (fields.duration_ms !== undefined) parts.push(`${fields.duration_ms} ms`);
+      if (fields.usage) parts.push("usage");
+      return parts.join(" / ");
+    }
+
+    function eventTime(event) {
+      if (!event.time) return "";
+      const date = new Date(event.time);
+      if (Number.isNaN(date.getTime())) return String(event.time);
+      return date.toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    }
+
+    function createEventCard(event) {
+      const tagClass = normalizeTag(event.tag);
+      const details = document.createElement("details");
+      details.className = tagClass;
+      details.open = tagClass === "error";
+
+      const summary = document.createElement("summary");
+      appendText(Object.assign(document.createElement("span"), { className: "time" }), eventTime(event));
+      const time = document.createElement("span");
+      time.className = "time";
+      time.textContent = eventTime(event);
+
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = String(event.tag || "debug");
+
+      const message = document.createElement("span");
+      message.className = "message";
+      message.textContent = compactValue(event.message);
+
+      const meta = document.createElement("span");
+      meta.className = "meta";
+      meta.textContent = eventMeta(event);
+
+      summary.append(time, tag, message, meta);
+
+      const body = document.createElement("div");
+      body.className = "body";
+      body.append(createIoView(event), createRawData(event));
+
+      details.append(summary, body);
+      return details;
+    }
+
+    function visibleEvents() {
+      if (activeFilter === "all") {
+        return events;
+      }
+      return events.filter((event) => String(event.tag || "").toLowerCase() === activeFilter);
+    }
+
+    function render() {
+      const items = visibleEvents();
+      eventCountEl.textContent = String(events.length);
+      eventsEl.replaceChildren();
+
+      if (!items.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = events.length ? "No events match this filter." : "Waiting for mosslog events.";
+        eventsEl.appendChild(empty);
+        return;
+      }
+
+      for (const event of items) {
+        eventsEl.appendChild(createEventCard(event));
+      }
+    }
+
+    async function loadSnapshot() {
+      const response = await fetch("/snapshot");
+      const payload = await response.json();
+      events = payload.events || [];
+      bufferSizeEl.textContent = String(payload.max_events || 1000);
+      render();
+    }
+
+    function connectEvents() {
+      source = new EventSource("/events");
+      source.addEventListener("open", () => {
+        setConnectionStatus(paused ? "paused" : "connected", paused ? "paused" : "");
+      });
+      source.addEventListener("error", () => {
+        setConnectionStatus("disconnected", "disconnected");
+      });
+      source.addEventListener("mosslog", (message) => {
+        const event = JSON.parse(message.data);
+        if (event.type === "clear") {
+          events = [];
+          pendingEvents = [];
+        } else if (paused) {
+          pendingEvents.push(event);
+        } else {
+          events.push(event);
+        }
+        render();
+      });
+    }
+
+    async function clearEvents() {
+      await fetch("/clear", { method: "POST" });
+      events = [];
+      pendingEvents = [];
+      render();
+    }
+
+    filtersEl.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-filter]");
+      if (!button) return;
+      activeFilter = button.dataset.filter;
+      for (const item of filtersEl.querySelectorAll(".filter")) {
+        item.classList.toggle("active", item === button);
+      }
+      render();
+    });
+
+    pauseButtonEl.addEventListener("click", () => {
+      paused = !paused;
+      if (paused) {
+        setPauseButtonState(true);
+        setConnectionStatus("paused", "paused");
+      } else {
+        setPauseButtonState(false);
+        events.push(...pendingEvents);
+        pendingEvents = [];
+        setConnectionStatus("connected", "");
+        render();
+      }
+    });
+
+    clearButtonEl.addEventListener("click", () => {
+      clearEvents();
+    });
+
+    loadSnapshot()
+      .then(connectEvents)
+      .catch((error) => {
+        setConnectionStatus("disconnected", "disconnected");
+        eventsEl.textContent = `Failed to load snapshot: ${error}`;
+      });
+  </script>
+</body>
+</html>

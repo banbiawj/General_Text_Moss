@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.agent.checkpointing import open_sqlite_checkpointer
+from app.agent.agent_mosslog import start_agent_mosslog
 from app.agent.graph import compile_agent_graph
 from app.api.routes import api_router, document_router
 from app.core.config import get_settings
@@ -22,6 +23,7 @@ async def lifespan(app: FastAPI):
     settings.storage_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path = settings.langgraph_checkpoint_path
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    start_agent_mosslog()
     async with open_sqlite_checkpointer(checkpoint_path) as checkpointer:
         app.state.agent_graph = compile_agent_graph(checkpointer=checkpointer)
         yield

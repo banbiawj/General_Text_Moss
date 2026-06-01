@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import operator
 from pathlib import Path
+from time import perf_counter
 from typing import Annotated, Any, AsyncGenerator, Literal, TypedDict
 from uuid import uuid4
 
@@ -14,6 +15,15 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 from pydantic import BaseModel, Field
 
+from app.agent.agent_mosslog import (
+    log_agent_error,
+    log_llm_request,
+    log_llm_response,
+    log_node_exit,
+    log_route_decision,
+    log_tool_result,
+    log_user_input,
+)
 from app.agent.state import AgentState, AgentTask, AgentTaskResult, TaskType
 from app.core.config import get_settings
 from app.services.canvas_context import (
@@ -41,6 +51,85 @@ def _ensure_langchain_legacy_debug_attr() -> None:
 
 
 _ensure_langchain_legacy_debug_attr()
+
+
+def _trace_context(state: dict[str, Any], task: dict[str, Any] | None = None) -> dict[str, Any]:
+    context = {
+        "session_id": state.get("session_id"),
+        "conversation_id": state.get("conversation_id"),
+        "request_id": state.get("request_id"),
+        "task_type": state.get("task_type"),
+        "current_task_index": state.get("current_task_index"),
+    }
+    if task is not None:
+        context["task_id"] = task.get("task_id")
+        context["task_status"] = task.get("status")
+    return {key: value for key, value in context.items() if value is not None}
+
+
+def _trace_payload(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return value.model_dump()
+    if isinstance(value, dict):
+        return {str(key): _trace_payload(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_trace_payload(item) for item in value]
+    if isinstance(value, (SystemMessage, HumanMessage, AIMessage, ToolMessage)):
+        return _trace_message(value)
+    return value
+
+
+def _trace_message(message: Any) -> Any:
+    if isinstance(message, SystemMessage):
+        role = "system"
+    elif isinstance(message, HumanMessage):
+        role = "user"
+    elif isinstance(message, AIMessage):
+        role = "assistant"
+    elif isinstance(message, ToolMessage):
+        role = "tool"
+    else:
+        return _trace_payload(message)
+
+    payload: dict[str, Any] = {
+        "role": role,
+        "type": getattr(message, "type", type(message).__name__),
+        "content": getattr(message, "content", ""),
+    }
+    tool_calls = getattr(message, "tool_calls", None)
+    if tool_calls:
+        payload["tool_calls"] = _trace_payload(tool_calls)
+    invalid_tool_calls = getattr(message, "invalid_tool_calls", None)
+    if invalid_tool_calls:
+        payload["invalid_tool_calls"] = _trace_payload(invalid_tool_calls)
+    tool_call_id = getattr(message, "tool_call_id", None)
+    if tool_call_id:
+        payload["tool_call_id"] = tool_call_id
+    response_metadata = getattr(message, "response_metadata", None)
+    if response_metadata:
+        payload["response_metadata"] = _trace_payload(response_metadata)
+    usage_metadata = getattr(message, "usage_metadata", None)
+    if usage_metadata:
+        payload["usage_metadata"] = _trace_payload(usage_metadata)
+    return payload
+
+
+def _trace_messages(messages: list[Any]) -> list[Any]:
+    return [_trace_message(message) for message in messages]
+
+
+def _trace_task(task: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "task_id": task.get("task_id"),
+        "status": task.get("status"),
+        "task_prompt": task.get("task_prompt"),
+        "task_tools": task.get("task_tools", []),
+        "task_message": _trace_messages(list(task.get("task_message", []))),
+        "canvas_context": task.get("canvas_context"),
+        "canvas_context_blocks": _trace_payload(task.get("canvas_context_blocks", [])),
+        "allowed_element_ids": task.get("allowed_element_ids", []),
+        "tool_budget_usage": task.get("tool_budget_usage", {}),
+    }
 
 
 def _load_prompt_template(filepath: str | Path) -> PromptTemplate:
@@ -184,12 +273,11 @@ def _invoke_intent_classifier(
         )
         .with_structured_output(output_schema, method="function_calling")
     )
-    return llm.invoke(
-        [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_content),
-        ]
-    )
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_content),
+    ]
+    return llm.invoke(messages)
 
 
 def _message_role_for_intent(message: Any) -> str | None:
@@ -272,12 +360,23 @@ def _format_contextual_intent_payload(state: AgentState) -> str:
 def intent_node(state: AgentState) -> dict[str, Any]:
     """Use LLM to classify user intent, then create a task in state.tasks."""
     settings = get_settings()
+    trace_context = _trace_context(state)
 
     if settings.enable_mock_llm:
-        return {
+        output = {
             "task_type": "general_chat",
             "task_reason": "mock（ENABLE_MOCK_LLM=true，跳过意图识别）",
         }
+        log_route_decision(
+            output["task_type"],
+            reason=output["task_reason"],
+            raw_payload={
+                "output": output,
+                "user_input": state.get("user_input", ""),
+                **trace_context,
+            },
+        )
+        return output
 
     system_prompt = _load_prompt_template(PROMPTS_DIR / "intent_prompt.yaml").format()
     result = _invoke_intent_classifier(
@@ -295,15 +394,36 @@ def intent_node(state: AgentState) -> dict[str, Any]:
             system_prompt=contextual_prompt,
             user_content=_format_contextual_intent_payload(state),
         )
-        return {
+        output = {
             "task_type": contextual_result.task_type,
             "task_reason": contextual_result.task_reason,
         }
+        log_route_decision(
+            output["task_type"],
+            reason=output["task_reason"],
+            raw_payload={
+                "output": output,
+                "user_input": state.get("user_input", ""),
+                "ambiguous_first_pass": _trace_payload(result),
+                **trace_context,
+            },
+        )
+        return output
 
-    return {
+    output = {
         "task_type": result.task_type,
         "task_reason": result.task_reason,
     }
+    log_route_decision(
+        output["task_type"],
+        reason=output["task_reason"],
+        raw_payload={
+            "output": output,
+            "user_input": state.get("user_input", ""),
+            **trace_context,
+        },
+    )
+    return output
 
 
 # ── Task Assemble Node ────────────────────────────────────────────────────
@@ -404,6 +524,53 @@ def _build_execute_messages(
     return [SystemMessage(content=system_prompt)] + bounded_history + task_messages
 
 
+def _invoke_llm_with_trace(
+    *,
+    llm: Any,
+    messages: list[Any],
+    settings: Any,
+    state: dict[str, Any],
+    task: dict[str, Any],
+    node: str,
+    tools: list[Any],
+) -> Any:
+    context = _trace_context(state, task)
+    trace_messages = _trace_messages(messages)
+    tool_names = [getattr(tool, "name", str(tool)) for tool in tools]
+    log_llm_request(
+        settings.llm_model,
+        trace_messages,
+        raw_payload={
+            "node": node,
+            "messages": trace_messages,
+            "tools": tool_names,
+            "task": _trace_task(task),
+            **context,
+        },
+    )
+    started_at = perf_counter()
+    try:
+        response = llm.invoke(messages)
+    except Exception as exc:
+        log_agent_error("llm invoke failed", exc, node=node, **context)
+        raise
+
+    response_payload = _trace_message(response)
+    log_llm_response(
+        settings.llm_model,
+        response_payload.get("content", response_payload),
+        tool_call=response_payload.get("tool_calls"),
+        duration_ms=round((perf_counter() - started_at) * 1000),
+        usage=getattr(response, "usage_metadata", None) or getattr(response, "response_metadata", None),
+        raw_payload={
+            "node": node,
+            "full_response": response_payload,
+            **context,
+        },
+    )
+    return response
+
+
 def execute_node(state: AgentState) -> dict[str, Any]:
     """Execute the current task via LLM with optional tool calling (ReAct).
 
@@ -446,7 +613,15 @@ def execute_node(state: AgentState) -> dict[str, Any]:
         task_messages=task_messages,
     )
 
-    response = llm.invoke(messages)
+    response = _invoke_llm_with_trace(
+        llm=llm,
+        messages=messages,
+        settings=settings,
+        state=state,
+        task=task,
+        node="execute",
+        tools=tools,
+    )
 
     # Append the LLM response to task working memory
     updated_messages = task_messages + [response]
@@ -524,7 +699,15 @@ def execute_task_node(state: TaskWorkerState) -> dict[str, Any]:
         task_messages=task_messages,
     )
 
-    response = llm.invoke(messages)
+    response = _invoke_llm_with_trace(
+        llm=llm,
+        messages=messages,
+        settings=settings,
+        state=state,
+        task=task,
+        node="execute",
+        tools=tools,
+    )
     updated_messages = task_messages + [response]
     tasks[current_idx] = {**task, "task_message": updated_messages}
 
@@ -675,14 +858,32 @@ def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask],
     pending_mutations: list[dict] = []
 
     for tool_call in last_msg.tool_calls:
+        tool_name = tool_call["name"]
+        tool_args = dict(tool_call.get("args") or {})
+        tool_context = {
+            **_trace_context(state, task),
+            "tool_call_id": tool_call.get("id"),
+        }
+        started_at = perf_counter()
         tool = next(
-            (t for t in DOCUMENT_TOOLS if t.name == tool_call["name"]),
+            (t for t in DOCUMENT_TOOLS if t.name == tool_name),
             None,
         )
         if not tool:
+            result_str = f"Tool '{tool_name}' not found."
+            log_tool_result(
+                tool_name,
+                result_str,
+                duration_ms=round((perf_counter() - started_at) * 1000),
+                raw_payload={
+                    "args": tool_args,
+                    "result": result_str,
+                    **tool_context,
+                },
+            )
             tool_results.append(
                 ToolMessage(
-                    content=f"Tool '{tool_call['name']}' not found.",
+                    content=result_str,
                     tool_call_id=tool_call["id"],
                 )
             )
@@ -692,20 +893,40 @@ def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask],
             task, budget_result = _consume_tool_budget(
                 state=state,
                 task=task,
-                tool_name=tool_call["name"],
+                tool_name=tool_name,
             )
             if budget_result is not None:
                 result_str = budget_result
+                log_tool_result(
+                    tool_name,
+                    result_str,
+                    duration_ms=round((perf_counter() - started_at) * 1000),
+                    raw_payload={
+                        "args": tool_args,
+                        "result": result_str,
+                        **tool_context,
+                    },
+                )
                 tool_results.append(
                     ToolMessage(content=result_str, tool_call_id=tool_call["id"])
                 )
                 continue
 
-            args = dict(tool_call["args"])
-            if tool_call["name"] in STATEFUL_DOCUMENT_TOOL_NAMES:
+            args = dict(tool_args)
+            if tool_name in STATEFUL_DOCUMENT_TOOL_NAMES:
                 args["state"] = state
             result = tool.invoke(args)
             result_str = str(result) if result is not None else ""
+            log_tool_result(
+                tool_name,
+                _trace_payload(result),
+                duration_ms=round((perf_counter() - started_at) * 1000),
+                raw_payload={
+                    "args": tool_args,
+                    "result": _trace_payload(result),
+                    **tool_context,
+                },
+            )
             task = _apply_canvas_context_tool_result(
                 state=state,
                 task=task,
@@ -713,13 +934,26 @@ def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask],
             )
         except Exception as e:
             result_str = f"Tool error: {e}"
+            log_agent_error("tool invoke failed", e, tool=tool_name, **tool_context)
+            log_tool_result(
+                tool_name,
+                result_str,
+                duration_ms=round((perf_counter() - started_at) * 1000),
+                error=str(e),
+                raw_payload={
+                    "args": tool_args,
+                    "result": result_str,
+                    "error": str(e),
+                    **tool_context,
+                },
+            )
 
         tool_results.append(
             ToolMessage(content=result_str, tool_call_id=tool_call["id"])
         )
 
         # Capture DOM mutations only after update_canvas_element validates the target.
-        if tool_call["name"] == "update_canvas_element":
+        if tool_name == "update_canvas_element":
             try:
                 mutation_payload = json.loads(result_str)
             except json.JSONDecodeError:
@@ -846,7 +1080,21 @@ def reduce_node(state: AgentState) -> dict[str, Any]:
         messages.extend(list(result.get("messages", [])))
         pending_mutations.extend(list(result.get("pending_mutations", [])))
 
-    return {"messages": messages, "pending_mutations": pending_mutations}
+    output = {"messages": messages, "pending_mutations": pending_mutations}
+    trace_messages = _trace_messages(messages)
+    log_node_exit(
+        "reduce",
+        {
+            "response": trace_messages,
+            "mutations": pending_mutations,
+        },
+        raw_payload={
+            "messages": trace_messages,
+            "pending_mutations": pending_mutations,
+            "request_id": request_id,
+        },
+    )
+    return output
 
 
 # ── Graph Definition ─────────────────────────────────────────────────────
@@ -976,6 +1224,18 @@ async def stream_agent_events(
         "conversation_id": conversation_id,
         "request_id": uuid4().hex,
     }
+    log_user_input(
+        user_input,
+        raw_payload={
+            "session_id": session_id,
+            "conversation_id": conversation_id,
+            "request_id": initial_state["request_id"],
+            "focus_element_id": focus_element_id,
+            "focus_block_id": focus_block_id,
+            "canvas_snapshot": canvas_snapshot,
+            "canvas_snapshot_length": len(canvas_snapshot),
+        },
+    )
 
     runtime_graph = compiled_graph or graph
     config = {"configurable": {"thread_id": conversation_id}}

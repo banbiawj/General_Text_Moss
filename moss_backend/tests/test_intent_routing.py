@@ -13,11 +13,13 @@ from app.core.config import get_settings
 
 class FakeIntentChatOpenAI:
     calls: list[dict] = []
+    instances: list["FakeIntentChatOpenAI"] = []
     outputs: list[SimpleNamespace] = []
 
     def __init__(self, **kwargs) -> None:
         self.kwargs = kwargs
         self.schema = None
+        self.__class__.instances.append(self)
 
     def with_structured_output(self, schema, method: str):
         self.schema = schema
@@ -36,6 +38,7 @@ class IntentRoutingTests(unittest.TestCase):
         os.environ["LLM_API_KEY"] = "test-key"
         get_settings.cache_clear()
         FakeIntentChatOpenAI.calls = []
+        FakeIntentChatOpenAI.instances = []
         FakeIntentChatOpenAI.outputs = []
 
     def tearDown(self) -> None:
@@ -104,6 +107,24 @@ class IntentRoutingTests(unittest.TestCase):
 
         self.assertEqual(result["task_type"], "document_qa")
         self.assertEqual(len(FakeIntentChatOpenAI.calls), 1)
+
+    def test_intent_classifier_configures_llm_timeout_and_retries(self) -> None:
+        FakeIntentChatOpenAI.outputs = [
+            SimpleNamespace(task_type="document_qa", task_reason="clear document question"),
+        ]
+
+        with patch.object(graph_module, "ChatOpenAI", FakeIntentChatOpenAI):
+            graph_module.intent_node(
+                {
+                    "user_input": "summarize",
+                    "messages": [HumanMessage(content="summarize")],
+                    "canvas_snapshot": '<p id="moss-block-1">target</p>',
+                    "focus_block_id": "moss-block-1",
+                }
+            )
+
+        self.assertEqual(FakeIntentChatOpenAI.instances[0].kwargs["timeout"], 120)
+        self.assertEqual(FakeIntentChatOpenAI.instances[0].kwargs["max_retries"], 2)
 
 
 if __name__ == "__main__":

@@ -306,6 +306,8 @@ def _invoke_intent_classifier(
             base_url=settings.llm_base_url,
             model=settings.llm_model,
             temperature=settings.llm_temperature,
+            timeout=120,
+            max_retries=2,
         )
         .with_structured_output(output_schema, method="function_calling")
     )
@@ -314,6 +316,31 @@ def _invoke_intent_classifier(
         HumanMessage(content=user_content),
     ]
     return llm.invoke(messages)
+
+
+async def _ainvoke_intent_classifier(
+    *,
+    output_schema: type[BaseModel],
+    system_prompt: str,
+    user_content: str,
+) -> BaseModel:
+    settings = get_settings()
+    llm = (
+        ChatOpenAI(
+            api_key=settings.llm_api_key,
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
+            temperature=settings.llm_temperature,
+            timeout=120,
+            max_retries=2,
+        )
+        .with_structured_output(output_schema, method="function_calling")
+    )
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_content),
+    ]
+    return await llm.ainvoke(messages)
 
 
 def _message_role_for_intent(message: Any) -> str | None:
@@ -460,6 +487,62 @@ def intent_node(state: AgentState) -> dict[str, Any]:
 
 
 # ── Task Assemble Node ────────────────────────────────────────────────────
+
+
+async def aintent_node(state: AgentState) -> dict[str, Any]:
+    """Use async LLM calls when the graph is streamed with astream_events."""
+    settings = get_settings()
+    trace_context = _trace_context(state)
+
+    if settings.enable_mock_llm:
+        return intent_node(state)
+
+    system_prompt = _load_prompt_template(PROMPTS_DIR / "intent_prompt.yaml").format()
+    result = await _ainvoke_intent_classifier(
+        output_schema=IntentCandidateOutput,
+        system_prompt=system_prompt,
+        user_content=state.get("user_input", ""),
+    )
+
+    if result.task_type == "ambiguous":
+        contextual_prompt = _load_prompt_template(
+            PROMPTS_DIR / "contextual_intent_prompt.yaml"
+        ).format()
+        contextual_result = await _ainvoke_intent_classifier(
+            output_schema=IntentOutput,
+            system_prompt=contextual_prompt,
+            user_content=_format_contextual_intent_payload(state),
+        )
+        output = {
+            "task_type": contextual_result.task_type,
+            "task_reason": contextual_result.task_reason,
+        }
+        log_route_decision(
+            output["task_type"],
+            reason=output["task_reason"],
+            raw_payload={
+                "output": output,
+                "user_input": state.get("user_input", ""),
+                "ambiguous_first_pass": _trace_payload(result),
+                **trace_context,
+            },
+        )
+        return output
+
+    output = {
+        "task_type": result.task_type,
+        "task_reason": result.task_reason,
+    }
+    log_route_decision(
+        output["task_type"],
+        reason=output["task_reason"],
+        raw_payload={
+            "output": output,
+            "user_input": state.get("user_input", ""),
+            **trace_context,
+        },
+    )
+    return output
 
 
 def task_assemble_node(state: AgentState) -> dict[str, Any]:
@@ -615,6 +698,56 @@ def _invoke_llm_with_trace(
     return response
 
 
+async def _ainvoke_llm_with_trace(
+    *,
+    llm: Any,
+    messages: list[Any],
+    settings: Any,
+    state: dict[str, Any],
+    task: dict[str, Any],
+    node: str,
+    tools: list[Any],
+) -> Any:
+    context = _trace_context(state, task)
+    visible_context = _visible_trace_fields(context)
+    trace_messages = _trace_messages(messages)
+    tool_names = [getattr(tool, "name", str(tool)) for tool in tools]
+    log_llm_request(
+        settings.llm_model,
+        trace_messages,
+        raw_payload={
+            "node": node,
+            "messages": trace_messages,
+            "tools": tool_names,
+            "task": _trace_task(task),
+            **context,
+        },
+        **visible_context,
+    )
+    started_at = perf_counter()
+    try:
+        response = await llm.ainvoke(messages)
+    except Exception as exc:
+        log_agent_error("llm invoke failed", exc, node=node, **context)
+        raise
+
+    response_payload = _trace_message(response)
+    log_llm_response(
+        settings.llm_model,
+        response_payload.get("content", response_payload),
+        tool_call=response_payload.get("tool_calls"),
+        duration_ms=round((perf_counter() - started_at) * 1000),
+        usage=getattr(response, "usage_metadata", None) or getattr(response, "response_metadata", None),
+        raw_payload={
+            "node": node,
+            "full_response": response_payload,
+            **context,
+        },
+        **visible_context,
+    )
+    return response
+
+
 def execute_node(state: AgentState) -> dict[str, Any]:
     """Execute the current task via LLM with optional tool calling (ReAct).
 
@@ -645,6 +778,8 @@ def execute_node(state: AgentState) -> dict[str, Any]:
         base_url=settings.llm_base_url,
         model=settings.llm_model,
         temperature=settings.llm_temperature,
+        timeout=120,
+        max_retries=2,
     )
     if tools:
         llm = llm.bind_tools(tools)
@@ -713,16 +848,7 @@ def execute_task_node(state: TaskWorkerState) -> dict[str, Any]:
             **{**task, "task_message": updated_messages, "status": "done"}
         )
         tasks[current_idx] = updated_task
-        return {
-            "tasks": tasks,
-            "task_results": [
-                _worker_task_result(
-                    state=state,
-                    task=updated_task,
-                    messages=[response],
-                )
-            ],
-        }
+        return {"tasks": tasks}
 
     tools = [t for t in DOCUMENT_TOOLS if t.name in task.get("task_tools", [])]
 
@@ -731,6 +857,8 @@ def execute_task_node(state: TaskWorkerState) -> dict[str, Any]:
         base_url=settings.llm_base_url,
         model=settings.llm_model,
         temperature=settings.llm_temperature,
+        timeout=120,
+        max_retries=2,
     )
     if tools:
         llm = llm.bind_tools(tools)
@@ -760,19 +888,89 @@ def execute_task_node(state: TaskWorkerState) -> dict[str, Any]:
         return {"tasks": tasks}
 
     tasks[current_idx] = {**tasks[current_idx], "status": "done"}
-    return {
-        "tasks": tasks,
-        "task_results": [
-            _worker_task_result(
-                state=state,
-                task=tasks[current_idx],
-                messages=[response],
-            )
-        ],
-    }
+    return {"tasks": tasks}
 
 
 # ── Custom Tools Node ────────────────────────────────────────────────────
+
+
+async def aexecute_task_node(state: TaskWorkerState) -> dict[str, Any]:
+    """Execute one Send-dispatched task with async LLM calls."""
+    settings = get_settings()
+    current_idx = state.get("current_task_index", 0)
+    tasks = list(state.get("tasks", []))
+    task = tasks[current_idx]
+
+    if settings.enable_mock_llm:
+        return execute_task_node(state)
+
+    tools = [t for t in DOCUMENT_TOOLS if t.name in task.get("task_tools", [])]
+
+    llm = ChatOpenAI(
+        api_key=settings.llm_api_key,
+        base_url=settings.llm_base_url,
+        model=settings.llm_model,
+        temperature=settings.llm_temperature,
+        timeout=120,
+        max_retries=2,
+    )
+    if tools:
+        llm = llm.bind_tools(tools)
+
+    task_messages = list(task.get("task_message", []))
+    conversation_messages = list(state.get("conversation_messages", []))
+    messages = _build_execute_messages(
+        system_prompt=task["task_prompt"],
+        conversation_messages=conversation_messages,
+        task_messages=task_messages,
+    )
+
+    response = await _ainvoke_llm_with_trace(
+        llm=llm,
+        messages=messages,
+        settings=settings,
+        state=state,
+        task=task,
+        node="execute",
+        tools=tools,
+    )
+    updated_messages = task_messages + [response]
+    tasks[current_idx] = {**task, "task_message": updated_messages}
+
+    if getattr(response, "tool_calls", None):
+        tasks[current_idx] = {**tasks[current_idx], "status": "running"}
+        return {"tasks": tasks}
+
+    tasks[current_idx] = {**tasks[current_idx], "status": "done"}
+    return {"tasks": tasks}
+
+
+def worker_finalize_node(state: TaskWorkerState) -> TaskWorkerOutputState:
+    """Expose only branch results to the parent graph, not worker-local tasks."""
+    current_idx = state.get("current_task_index", 0)
+    tasks = list(state.get("tasks", []))
+    if not tasks:
+        return {"task_results": []}
+
+    try:
+        task = tasks[int(current_idx)]
+    except (IndexError, TypeError, ValueError):
+        task = tasks[0]
+
+    messages = [
+        message
+        for message in list(task.get("task_message", []))
+        if isinstance(message, AIMessage) and not getattr(message, "tool_calls", None)
+    ]
+    return {
+        "task_results": [
+            _worker_task_result(
+                state=state,
+                task=task,
+                messages=messages[-1:],
+            )
+        ]
+    }
 
 
 def _apply_canvas_context_tool_result(
@@ -1392,12 +1590,12 @@ def router_execute_task(state: TaskWorkerState) -> str:
     current_idx = state.get("current_task_index", 0)
     tasks = state.get("tasks", [])
     if not tasks:
-        return END
+        return "finalize"
     task = tasks[current_idx]
     msgs = task.get("task_message", [])
     if msgs and getattr(msgs[-1], "tool_calls", None):
         return "tools"
-    return END
+    return "finalize"
 
 
 def route_tasks(state: AgentState) -> list[Send] | str:
@@ -1472,22 +1670,30 @@ def reduce_node(state: AgentState) -> dict[str, Any]:
 # ── Graph Definition ─────────────────────────────────────────────────────
 
 worker_builder = StateGraph(TaskWorkerState, output=TaskWorkerOutputState)
-worker_builder.add_node("execute", execute_task_node)
+worker_builder.add_node("execute", aexecute_task_node)
 worker_builder.add_node("tools", worker_tools_node)
+worker_builder.add_node("finalize", worker_finalize_node)
 worker_builder.add_edge(START, "execute")
 worker_builder.add_edge("tools", "execute")
+worker_builder.add_edge("finalize", END)
 worker_builder.add_conditional_edges(
     "execute",
     router_execute_task,
-    {"tools": "tools", END: END},
+    {"tools": "tools", "finalize": "finalize"},
 )
 task_worker_graph = worker_builder.compile()
 
 
+async def task_worker_node(state: TaskWorkerState) -> TaskWorkerOutputState:
+    """Run the worker subgraph and expose only parent-safe result channels."""
+    output = await task_worker_graph.ainvoke(state)
+    return {"task_results": list(output.get("task_results", []))}
+
+
 builder = StateGraph(AgentState)
-builder.add_node("intent", intent_node)
+builder.add_node("intent", aintent_node)
 builder.add_node("task_assemble", task_assemble_node)
-builder.add_node("task_worker", task_worker_graph)
+builder.add_node("task_worker", task_worker_node)
 builder.add_node("reduce", reduce_node)
 
 builder.add_edge(START, "intent")

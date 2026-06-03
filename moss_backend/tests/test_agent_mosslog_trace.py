@@ -11,6 +11,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from app.agent import graph as graph_module
 from app.agent.graph import (
     _run_tools_for_current_task,
+    execute_node,
     execute_task_node,
     intent_node,
     reduce_node,
@@ -31,8 +32,11 @@ class FakeTraceGraph:
 
 
 class FakeChatOpenAI:
+    instances: list["FakeChatOpenAI"] = []
+
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
+        self.__class__.instances.append(self)
 
     def bind_tools(self, tools: list[Any]) -> "FakeChatOpenAI":
         self.tools = tools
@@ -41,6 +45,33 @@ class FakeChatOpenAI:
     def invoke(self, messages: list[Any]) -> AIMessage:
         self.messages = messages
         return AIMessage(content="model answer")
+
+
+class FakeAsyncOnlyChatOpenAI:
+    calls: list[dict[str, Any]] = []
+    outputs: list[Any] = []
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.kwargs = kwargs
+        self.schema: type[Any] | None = None
+        self.tools: list[Any] = []
+
+    def with_structured_output(self, schema: type[Any], method: str) -> "FakeAsyncOnlyChatOpenAI":
+        self.schema = schema
+        return self
+
+    def bind_tools(self, tools: list[Any]) -> "FakeAsyncOnlyChatOpenAI":
+        self.tools = tools
+        return self
+
+    def invoke(self, messages: list[Any]) -> AIMessage:
+        raise AssertionError("sync invoke should not be used inside async graph streaming")
+
+    async def ainvoke(self, messages: list[Any]) -> Any:
+        self.__class__.calls.append(
+            {"schema": self.schema, "tools": self.tools, "messages": messages}
+        )
+        return self.__class__.outputs.pop(0)
 
 
 class FakeTool:
@@ -134,6 +165,38 @@ class AgentMosslogTraceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(hasattr(graph_module, "log_node_enter"))
 
+    async def test_stream_agent_events_uses_async_llm_invocation(self) -> None:
+        FakeAsyncOnlyChatOpenAI.calls = []
+        FakeAsyncOnlyChatOpenAI.outputs = [
+            graph_module.IntentCandidateOutput(
+                task_type="general_chat",
+                task_reason="clear chat",
+            ),
+            AIMessage(content="async model answer"),
+        ]
+
+        with patch.object(graph_module, "ChatOpenAI", FakeAsyncOnlyChatOpenAI):
+            events = await drain_events(
+                stream_agent_events(
+                    session_id="session-async",
+                    conversation_id="conversation-async",
+                    user_input="hello",
+                    focus_element_id=None,
+                    focus_block_id=None,
+                    canvas_snapshot="",
+                    compiled_graph=graph_module.compile_agent_graph(),
+                )
+            )
+
+        self.assertEqual(len(FakeAsyncOnlyChatOpenAI.calls), 2)
+        self.assertIn(
+            {
+                "event": "chat_chunk",
+                "data": {"content": "async model answer", "done": True},
+            },
+            events,
+        )
+
     async def test_execute_task_node_logs_full_llm_request_and_response(self) -> None:
         task = {
             "task_id": "task-1",
@@ -173,6 +236,54 @@ class AgentMosslogTraceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(response_kwargs["tool_call"])
         self.assertEqual(response_kwargs["raw_payload"]["full_response"]["content"], "model answer")
         self.assertIn("duration_ms", response_kwargs)
+
+    async def test_execute_task_node_configures_llm_timeout_and_retries(self) -> None:
+        task = {
+            "task_id": "task-timeout",
+            "task_prompt": "system prompt",
+            "task_message": [],
+            "task_tools": [],
+            "status": "pending",
+        }
+        state = {
+            "tasks": [task],
+            "current_task_index": 0,
+            "conversation_messages": [],
+            "session_id": "session-1",
+            "conversation_id": "conversation-1",
+            "request_id": "request-1",
+        }
+
+        FakeChatOpenAI.instances = []
+        with patch.object(graph_module, "ChatOpenAI", FakeChatOpenAI):
+            execute_task_node(state)
+
+        self.assertEqual(FakeChatOpenAI.instances[0].kwargs["timeout"], 120)
+        self.assertEqual(FakeChatOpenAI.instances[0].kwargs["max_retries"], 2)
+
+    async def test_execute_node_configures_llm_timeout_and_retries(self) -> None:
+        task = {
+            "task_id": "task-timeout",
+            "task_prompt": "system prompt",
+            "task_message": [],
+            "task_tools": [],
+            "status": "pending",
+        }
+        state = {
+            "tasks": [task],
+            "current_task_index": 0,
+            "messages": [],
+            "session_id": "session-1",
+            "conversation_id": "conversation-1",
+            "request_id": "request-1",
+        }
+
+        FakeChatOpenAI.instances = []
+        with patch.object(graph_module, "ChatOpenAI", FakeChatOpenAI):
+            execute_node(state)
+
+        self.assertEqual(FakeChatOpenAI.instances[0].kwargs["timeout"], 120)
+        self.assertEqual(FakeChatOpenAI.instances[0].kwargs["max_retries"], 2)
 
     async def test_send_worker_llm_logs_expose_source_task_index(self) -> None:
         task = {

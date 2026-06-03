@@ -25,6 +25,18 @@ class DownloadLinkArgs(BaseModel):
     content: str = Field(default="", description="需要导出的文档内容")
 
 
+class UpdateCanvasElementArgs(BaseModel):
+    block_ref: str = Field(description="Block reference shown in canvas_context, such as b1 or b2.")
+    action_type: Literal["replace", "append", "insert", "delete"] = Field(
+        default="replace",
+        description="Document mutation type: replace, append, insert, or delete.",
+    )
+    new_html: str = Field(
+        default="",
+        description="Replacement or inserted HTML. May be empty for delete.",
+    )
+
+
 class ParsedHtmlBlock(BaseModel):
     block_id: str
     index: int
@@ -225,17 +237,34 @@ def canvas_read_after(
     return _json_result(result)
 
 
-@tool
+@tool(args_schema=DownloadLinkArgs)
+def generate_download_link(export_format: str, content: str = "") -> str:
+    """Prepare a temporary download URL for the requested document format."""
+
+    token = uuid4().hex
+    DOWNLOAD_CACHE[token] = {
+        "format": export_format,
+        "content": content,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    return f"/api/v1/download/{token}"
+
+
+@tool(args_schema=UpdateCanvasElementArgs)
 def update_canvas_element(
-    element_id: Annotated[
-        str,
-        "前端文档中需要操作的 DOM 节点 id。必须与 canvas_context 中的 DOM id 完全一致。",
-    ],
+    block_ref: Annotated[
+        str | None,
+        "Block reference shown in canvas_context, such as b1 or b2. Prefer this over DOM ids.",
+    ] = None,
     action_type: Annotated[
         Literal["replace", "append", "insert", "delete"],
-        "文档操作类型：replace/append/insert/delete",
-    ],
-    new_html: Annotated[str, "新的 HTML 片段，delete 时可以为空"] = "",
+        "Document mutation type: replace, append, insert, or delete.",
+    ] = "replace",
+    new_html: Annotated[str, "Replacement or inserted HTML. May be empty for delete."] = "",
+    element_id: Annotated[
+        str | None,
+        "Internal DOM node id resolved by the tool node.",
+    ] = None,
     state: Annotated[dict[str, Any], InjectedState] = None,
 ) -> str:
     """Dispatch a structured document mutation to the browser canvas."""
@@ -252,10 +281,10 @@ def update_canvas_element(
                 "ok": False,
                 "operation": "update_canvas_element",
                 "error": "element_id_not_found",
-                "element_id": element_id,
+                "block_ref": block_ref,
                 "action_type": action_type,
                 "message": "element_id does not exist in current canvas_snapshot.",
-                "hint": "Use the exact DOM id shown in the canvas_context DOM id field. Do not construct IDs from position numbers.",
+                "hint": "Use the exact block_ref shown in canvas_context, such as b1 or b2.",
             }
         )
 
@@ -264,23 +293,11 @@ def update_canvas_element(
             "ok": True,
             "operation": "update_canvas_element",
             "element_id": element_id,
+            "block_ref": block_ref,
             "action_type": action_type,
             "new_html": new_html,
         }
     )
-
-
-@tool(args_schema=DownloadLinkArgs)
-def generate_download_link(export_format: str, content: str = "") -> str:
-    """Prepare a temporary download URL for the requested document format."""
-
-    token = uuid4().hex
-    DOWNLOAD_CACHE[token] = {
-        "format": export_format,
-        "content": content,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    return f"/api/v1/download/{token}"
 
 
 DOCUMENT_TOOLS = [

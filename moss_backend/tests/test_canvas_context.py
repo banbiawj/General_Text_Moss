@@ -154,21 +154,26 @@ class CanvasContextTests(unittest.TestCase):
 
         rendered = render_canvas_context(merge_canvas_context_blocks(first, second))
 
-        self.assertIn("[Omitted blocks 1-2]", rendered)
-        self.assertLess(rendered.index("moss-block-0"), rendered.index("moss-block-3"))
+        self.assertIn("[Omitted intervening blocks]", rendered)
+        self.assertLess(rendered.index("[block: b1"), rendered.index("[block: b2"))
 
-    def test_render_canvas_context_leads_with_dom_id_before_position(self) -> None:
+    def test_render_canvas_context_uses_block_refs_without_dom_ids_or_position(self) -> None:
         blocks = context_blocks_from_html(
-            canvas_snapshot=_snapshot(1),
-            context_html='<p id="moss-block-0">block 0</p>',
+            canvas_snapshot=_snapshot(2),
+            context_html='<p id="moss-block-0">block 0</p><p id="moss-block-1">block 1</p>',
             source="initial",
             added_at=1,
         )
 
         rendered = render_canvas_context(blocks)
 
-        self.assertIn("[DOM id: moss-block-0 | position: 0 | tag: p]", rendered)
-        self.assertNotIn("[Block 0 | id=moss-block-0", rendered)
+        self.assertIn("[block: b1 | tag: p]", rendered)
+        self.assertIn("[block: b2 | tag: p]", rendered)
+        self.assertIn("<p>block 0</p>", rendered)
+        self.assertIn("<p>block 1</p>", rendered)
+        self.assertNotIn("moss-block-", rendered)
+        self.assertNotIn("DOM id", rendered)
+        self.assertNotIn("position:", rendered)
 
     def test_clamp_block_count_limits_single_tool_call_size(self) -> None:
         self.assertEqual(clamp_block_count(0), 1)

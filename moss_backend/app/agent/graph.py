@@ -27,9 +27,15 @@ from app.agent.agent_mosslog import (
 from app.agent.state import AgentState, AgentTask, AgentTaskResult, TaskType
 from app.core.config import get_settings
 from app.services.canvas_context import (
+    assign_block_refs,
+    block_id_for_block_ref,
+    block_ref_for_block_id,
+    block_ref_map_from_context_blocks,
     context_blocks_from_html,
+    is_block_ref,
     merge_canvas_context_blocks,
     render_canvas_context,
+    strip_moss_block_id,
 )
 from app.services.document_content import tailor_context
 from app.tools.document_tools import DOCUMENT_TOOLS
@@ -231,6 +237,15 @@ def _format_task_prompt(
     )
 
 
+def _visible_focus_ref(
+    *,
+    context_blocks: list[dict[str, Any]],
+    focus_block_id: str | None,
+    fallback: str | None,
+) -> str:
+    return block_ref_for_block_id(context_blocks, focus_block_id) or (fallback or "")
+
+
 # ── Intent Node ──────────────────────────────────────────────────────────
 
 
@@ -331,7 +346,6 @@ def _format_contextual_intent_payload(state: AgentState) -> str:
     user_input = state.get("user_input", "")
     canvas_snapshot = state.get("canvas_snapshot", "")
     focus_block_id = state.get("focus_block_id") or ""
-    focus_element_id = state.get("focus_element_id") or ""
     has_canvas_snapshot = bool(str(canvas_snapshot or "").strip())
     has_focus_block = bool(focus_block_id)
     recent_history = _format_recent_intent_history(
@@ -348,8 +362,6 @@ def _format_contextual_intent_payload(state: AgentState) -> str:
             "当前文档状态：",
             f"- has_canvas_snapshot: {str(has_canvas_snapshot).lower()}",
             f"- has_focus_block: {str(has_focus_block).lower()}",
-            f"- focus_block_id: {focus_block_id}",
-            f"- focus_element_id: {focus_element_id}",
             "",
             "最近 8 条聊天记录：",
             recent_history,
@@ -482,13 +494,20 @@ def task_assemble_node(state: AgentState) -> dict[str, Any]:
             source="initial",
             added_at=0,
         )
+        canvas_context_blocks = assign_block_refs(canvas_context_blocks)
+        block_ref_map = block_ref_map_from_context_blocks(canvas_context_blocks)
         rendered_context = render_canvas_context(canvas_context_blocks) if canvas_context_blocks else chunk
+        visible_focus_ref = _visible_focus_ref(
+            context_blocks=canvas_context_blocks,
+            focus_block_id=focus_block_id,
+            fallback=focus_element_id,
+        )
         task_prompt = _format_task_prompt(
             task_type=task_type,
             user_input=user_input,
             canvas_context=rendered_context,
-            focus_element_id=focus_element_id,
-            focus_block_id=focus_block_id,
+            focus_element_id=visible_focus_ref,
+            focus_block_id=visible_focus_ref,
             task_tools=task_tools,
         )
         task = AgentTask(
@@ -496,6 +515,7 @@ def task_assemble_node(state: AgentState) -> dict[str, Any]:
             task_message=[],
             canvas_context=rendered_context,
             canvas_context_blocks=canvas_context_blocks,
+            block_ref_map=block_ref_map,
             canvas_context_operation_seq=0,
             task_prompt=task_prompt,
             task_tools=task_tools,
@@ -753,7 +773,8 @@ def _apply_canvas_context_tool_result(
     if not isinstance(existing_blocks, list):
         existing_blocks = []
 
-    merged_blocks = merge_canvas_context_blocks(existing_blocks, new_blocks)
+    merged_blocks = assign_block_refs(merge_canvas_context_blocks(existing_blocks, new_blocks))
+    block_ref_map = block_ref_map_from_context_blocks(merged_blocks)
     rendered_context = render_canvas_context(merged_blocks)
     try:
         operation_seq = int(task.get("canvas_context_operation_seq", 0)) + 1
@@ -761,19 +782,25 @@ def _apply_canvas_context_tool_result(
         operation_seq = 1
     task_tools = list(task.get("task_tools", []))
     task_type: TaskType = state.get("task_type", "general_chat")
+    visible_focus_ref = _visible_focus_ref(
+        context_blocks=merged_blocks,
+        focus_block_id=state.get("focus_block_id"),
+        fallback=state.get("focus_element_id"),
+    )
 
     return AgentTask(
         **{
             **task,
             "canvas_context_blocks": merged_blocks,
+            "block_ref_map": block_ref_map,
             "canvas_context_operation_seq": operation_seq,
             "canvas_context": rendered_context,
             "task_prompt": _format_task_prompt(
                 task_type=task_type,
                 user_input=state.get("user_input", ""),
                 canvas_context=rendered_context,
-                focus_element_id=state.get("focus_element_id"),
-                focus_block_id=state.get("focus_block_id"),
+                focus_element_id=visible_focus_ref,
+                focus_block_id=visible_focus_ref,
                 task_tools=task_tools,
             ),
         }
@@ -847,6 +874,152 @@ def _consume_tool_budget(
     return AgentTask(**{**task, "tool_budget_usage": usage}), None
 
 
+def _unknown_block_ref_result(block_ref: Any, tool_name: str) -> str:
+    return json.dumps(
+        {
+            "ok": False,
+            "operation": tool_name,
+            "error": "unknown_block_ref",
+            "block_ref": block_ref,
+            "message": "block_ref is not available in the current canvas context.",
+            "hint": "Use one of the block references shown in the current canvas_context, such as b1 or b2.",
+        },
+        ensure_ascii=False,
+    )
+
+
+def _task_context_blocks(task: AgentTask) -> list[dict[str, Any]]:
+    context_blocks = task.get("canvas_context_blocks", [])
+    return context_blocks if isinstance(context_blocks, list) else []
+
+
+def _resolve_block_ref_from_task(task: AgentTask, block_ref: Any) -> str | None:
+    context_blocks = _task_context_blocks(task)
+    element_id = block_id_for_block_ref(context_blocks, block_ref)
+    if element_id:
+        return element_id
+
+    block_ref_map = task.get("block_ref_map", {})
+    if isinstance(block_ref_map, dict):
+        candidate = block_ref_map.get(str(block_ref))
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return None
+
+
+def _resolve_update_canvas_element_args(
+    *,
+    task: AgentTask,
+    tool_args: dict[str, Any],
+) -> tuple[dict[str, Any], str | None]:
+    args = dict(tool_args)
+    block_ref = args.pop("block_ref", None)
+    if block_ref is None:
+        return args, None
+
+    element_id = _resolve_block_ref_from_task(task, block_ref)
+
+    if not element_id:
+        return args, _unknown_block_ref_result(block_ref, "update_canvas_element")
+
+    args["element_id"] = element_id
+    args["_block_ref"] = str(block_ref)
+    return args, None
+
+
+def _resolve_canvas_read_args(
+    *,
+    task: AgentTask,
+    tool_name: str,
+    tool_args: dict[str, Any],
+) -> tuple[dict[str, Any], str | None]:
+    args = dict(tool_args)
+    block_ref = args.pop("anchor_block_ref", None)
+    anchor_block_id = args.get("anchor_block_id")
+    if block_ref is None and is_block_ref(anchor_block_id):
+        block_ref = args.pop("anchor_block_id", None)
+    if block_ref is None:
+        return args, None
+
+    anchor_block_id = _resolve_block_ref_from_task(task, block_ref)
+    if not anchor_block_id:
+        return args, _unknown_block_ref_result(block_ref, tool_name)
+
+    args["anchor_block_id"] = anchor_block_id
+    return args, None
+
+
+def _redact_update_canvas_result_for_llm(result_str: str, block_ref: str | None) -> str:
+    if not block_ref:
+        return result_str
+    try:
+        payload = json.loads(result_str)
+    except json.JSONDecodeError:
+        return result_str
+    if not isinstance(payload, dict):
+        return result_str
+
+    payload["block_ref"] = block_ref
+    payload.pop("element_id", None)
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _redact_canvas_context_add_result_for_llm(
+    *,
+    task: AgentTask,
+    result_str: str,
+) -> str:
+    try:
+        payload = json.loads(result_str)
+    except json.JSONDecodeError:
+        return result_str
+    if not isinstance(payload, dict) or payload.get("operation") != "canvas_context_add":
+        return result_str
+
+    context_blocks = task.get("canvas_context_blocks", [])
+    if not isinstance(context_blocks, list):
+        context_blocks = []
+    blocks_by_id = {
+        str(block.get("block_id")): block
+        for block in context_blocks
+        if block.get("block_id")
+    }
+
+    anchor_block_ref = block_ref_for_block_id(
+        context_blocks,
+        payload.get("anchor_block_id"),
+    )
+    if anchor_block_ref:
+        payload["anchor_block_ref"] = anchor_block_ref
+    payload.pop("anchor_block_id", None)
+    payload.pop("anchor_index", None)
+
+    redacted_blocks: list[dict[str, Any]] = []
+    for raw_block in payload.get("blocks") or []:
+        if not isinstance(raw_block, dict):
+            continue
+        block_id = str(raw_block.get("block_id") or "")
+        context_block = blocks_by_id.get(block_id, raw_block)
+        block_ref = str(context_block.get("block_ref") or "") or block_ref_for_block_id(
+            context_blocks,
+            block_id,
+        )
+        redacted_blocks.append(
+            {
+                "block_ref": block_ref,
+                "tag": raw_block.get("tag", context_block.get("tag", "unknown")),
+                "heading_path": raw_block.get("heading_path", context_block.get("heading_path", [])),
+                "text": raw_block.get("text", context_block.get("text", "")),
+                "html": strip_moss_block_id(
+                    str(raw_block.get("html") or context_block.get("html") or "")
+                ),
+            }
+        )
+    payload["blocks"] = redacted_blocks
+
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask], list[dict]]:
     current_idx = state["current_task_index"]
     tasks = list(state["tasks"])
@@ -913,10 +1086,63 @@ def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask],
                 continue
 
             args = dict(tool_args)
+            resolved_block_ref: str | None = None
+            if tool_name == "update_canvas_element":
+                args, ref_error = _resolve_update_canvas_element_args(
+                    task=task,
+                    tool_args=tool_args,
+                )
+                if ref_error is not None:
+                    result_str = ref_error
+                    log_tool_result(
+                        tool_name,
+                        result_str,
+                        duration_ms=round((perf_counter() - started_at) * 1000),
+                        raw_payload={
+                            "args": tool_args,
+                            "result": result_str,
+                            **tool_context,
+                        },
+                    )
+                    tool_results.append(
+                        ToolMessage(content=result_str, tool_call_id=tool_call["id"])
+                    )
+                    continue
+                resolved_block_ref = args.pop("_block_ref", None)
+            elif tool_name in {"canvas_read_before", "canvas_read_after"}:
+                args, ref_error = _resolve_canvas_read_args(
+                    task=task,
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                )
+                if ref_error is not None:
+                    result_str = ref_error
+                    log_tool_result(
+                        tool_name,
+                        result_str,
+                        duration_ms=round((perf_counter() - started_at) * 1000),
+                        raw_payload={
+                            "args": tool_args,
+                            "result": result_str,
+                            **tool_context,
+                        },
+                    )
+                    tool_results.append(
+                        ToolMessage(content=result_str, tool_call_id=tool_call["id"])
+                    )
+                    continue
             if tool_name in STATEFUL_DOCUMENT_TOOL_NAMES:
                 args["state"] = state
-            result = tool.invoke(args)
+            if tool_name == "update_canvas_element" and hasattr(tool, "func"):
+                result = tool.func(**args)
+            else:
+                result = tool.invoke(args)
             result_str = str(result) if result is not None else ""
+            if tool_name == "update_canvas_element":
+                result_str = _redact_update_canvas_result_for_llm(
+                    result_str,
+                    resolved_block_ref,
+                )
             log_tool_result(
                 tool_name,
                 _trace_payload(result),
@@ -929,6 +1155,10 @@ def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask],
             )
             task = _apply_canvas_context_tool_result(
                 state=state,
+                task=task,
+                result_str=result_str,
+            )
+            result_str = _redact_canvas_context_add_result_for_llm(
                 task=task,
                 result_str=result_str,
             )
@@ -960,9 +1190,9 @@ def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask],
                 mutation_payload = {}
             if isinstance(mutation_payload, dict) and mutation_payload.get("ok") is True:
                 pending_mutations.append({
-                    "element_id": tool_call["args"].get("element_id", ""),
-                    "action_type": tool_call["args"].get("action_type", ""),
-                    "new_html": tool_call["args"].get("new_html", ""),
+                    "element_id": args.get("element_id", ""),
+                    "action_type": args.get("action_type", ""),
+                    "new_html": args.get("new_html", ""),
                 })
 
     tasks[current_idx] = {**task, "task_message": task_messages + tool_results}

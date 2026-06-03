@@ -28,6 +28,7 @@ class AgentTask(TypedDict, total=False):
     # 注意：不是完整 canvas_snapshot。
     canvas_context: str
     canvas_context_blocks: list[dict[str, Any]]
+    block_ref_map: dict[str, str]
     canvas_context_operation_seq: int
 
     # 基于任务意图生成的任务提示词。

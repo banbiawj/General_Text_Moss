@@ -84,7 +84,8 @@ class IntentRoutingTests(unittest.TestCase):
         self.assertIn("assistant history 9", contextual_payload)
         self.assertIn("has_canvas_snapshot: true", contextual_payload)
         self.assertIn("has_focus_block: true", contextual_payload)
-        self.assertIn("focus_block_id: moss-block-1", contextual_payload)
+        self.assertNotIn("focus_block_id: moss-block-1", contextual_payload)
+        self.assertNotIn("moss-block-", contextual_payload)
 
     def test_clear_first_pass_intent_does_not_use_contextual_intent(self) -> None:
         FakeIntentChatOpenAI.outputs = [

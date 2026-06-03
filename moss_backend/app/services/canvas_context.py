@@ -9,6 +9,9 @@ from app.services.document_content import _extract_moss_blocks
 
 CanvasDirection = Literal["before", "after"]
 MAX_READ_BLOCKS = 8
+BLOCK_REF_PREFIX = "b"
+BLOCK_REF_RE = re.compile(r"^b[1-9]\d*$")
+MOSS_BLOCK_ID_ATTR_RE = re.compile(r"\s+id=([\"'])moss-block-[^\"']+\1")
 
 
 def clamp_block_count(block_count: Any) -> int:
@@ -66,6 +69,47 @@ def context_blocks_from_html(
         if block["block_id"] in context_ids
     ]
     return sorted(blocks, key=lambda block: int(block["index"]))
+
+
+def assign_block_refs(context_blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ordered = sorted(context_blocks, key=lambda block: int(block["index"]))
+    assigned: list[dict[str, Any]] = []
+
+    for offset, block in enumerate(ordered, start=1):
+        item = dict(block)
+        item["block_ref"] = f"{BLOCK_REF_PREFIX}{offset}"
+        assigned.append(item)
+
+    return assigned
+
+
+def block_ref_map_from_context_blocks(context_blocks: list[dict[str, Any]]) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for block in assign_block_refs(context_blocks):
+        block_ref = str(block.get("block_ref") or "")
+        block_id = str(block.get("block_id") or "")
+        if block_ref and block_id:
+            mapping[block_ref] = block_id
+    return mapping
+
+
+def block_ref_for_block_id(context_blocks: list[dict[str, Any]], block_id: Any) -> str | None:
+    if not isinstance(block_id, str) or not block_id:
+        return None
+    for block in assign_block_refs(context_blocks):
+        if block.get("block_id") == block_id:
+            return str(block.get("block_ref") or "")
+    return None
+
+
+def block_id_for_block_ref(context_blocks: list[dict[str, Any]], block_ref: Any) -> str | None:
+    if not is_block_ref(block_ref):
+        return None
+    return block_ref_map_from_context_blocks(context_blocks).get(str(block_ref))
+
+
+def is_block_ref(value: Any) -> bool:
+    return isinstance(value, str) and bool(BLOCK_REF_RE.fullmatch(value))
 
 
 def read_neighbor_blocks(
@@ -143,13 +187,14 @@ def merge_canvas_context_blocks(
 
 
 def render_canvas_context(context_blocks: list[dict[str, Any]]) -> str:
-    ordered = sorted(context_blocks, key=lambda block: int(block["index"]))
+    ordered = assign_block_refs(context_blocks)
     if not ordered:
         return ""
 
     lines = [
         "[Canvas Context]",
-        "The following blocks are ordered by their position in canvas_snapshot.",
+        "The following blocks are ordered as they appear in the document.",
+        "Use the block reference, such as b1 or b2, when calling document tools.",
         "Gap markers mean intervening blocks have not been loaded into this context.",
         "",
     ]
@@ -158,19 +203,23 @@ def render_canvas_context(context_blocks: list[dict[str, Any]]) -> str:
     for block in ordered:
         index = int(block["index"])
         if previous_index is not None and index > previous_index + 1:
-            lines.append(f"[Omitted blocks {previous_index + 1}-{index - 1}]")
+            lines.append("[Omitted intervening blocks]")
             lines.append("")
 
         heading_path = block.get("heading_path") or []
         heading_suffix = f" | {' / '.join(heading_path)}" if heading_path else ""
         lines.append(
-            f"[DOM id: {block['block_id']} | position: {index} | tag: {block.get('tag', 'unknown')}{heading_suffix}]"
+            f"[block: {block.get('block_ref')} | tag: {block.get('tag', 'unknown')}{heading_suffix}]"
         )
-        lines.append(str(block.get("html") or block.get("text") or ""))
+        lines.append(strip_moss_block_id(str(block.get("html") or block.get("text") or "")))
         lines.append("")
         previous_index = index
 
     return "\n".join(lines).rstrip()
+
+
+def strip_moss_block_id(html: str) -> str:
+    return MOSS_BLOCK_ID_ATTR_RE.sub("", html or "", count=1)
 
 
 def _read_result(

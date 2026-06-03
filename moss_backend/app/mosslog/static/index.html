@@ -561,16 +561,16 @@
         ioView.appendChild(createBlock(event.tag === "llm" ? "Assistant / Response" : "Response", fields.response));
       }
 
+      if (fields.mutations !== undefined) {
+        ioView.appendChild(createBlock("Mutations", fields.mutations));
+      }
+
       if (fields.tool_call !== undefined) {
         ioView.appendChild(createToolCallBlock(fields.tool_call));
       }
 
       if (fields.tool_calls !== undefined) {
         ioView.appendChild(createToolCallBlock(fields.tool_calls));
-      }
-
-      if (fields.mutations !== undefined) {
-        ioView.appendChild(createBlock("Mutations", fields.mutations));
       }
 
       if (fields.error !== undefined) {

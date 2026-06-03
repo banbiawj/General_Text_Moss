@@ -113,8 +113,8 @@ class GraphThreadingTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(
-            fake_graph.captured_config,
-            {"configurable": {"thread_id": "conv-thread123"}},
+            fake_graph.captured_config["configurable"],
+            {"thread_id": "conv-thread123"},
         )
         self.assertIsNotNone(fake_graph.captured_initial_state)
         messages = fake_graph.captured_initial_state["messages"]
@@ -125,6 +125,26 @@ class GraphThreadingTests(unittest.IsolatedAsyncioTestCase):
             fake_graph.captured_initial_state["conversation_id"],
             "conv-thread123",
         )
+
+    async def test_stream_agent_events_sets_recursion_limit_above_langgraph_default(self) -> None:
+        fake_graph = FakeCompiledGraph()
+
+        await drain_events(
+            stream_agent_events(
+                session_id="session-a",
+                conversation_id="conv-recursion123",
+                user_input="polish the whole document",
+                focus_element_id=None,
+                focus_block_id=None,
+                canvas_snapshot="",
+                compiled_graph=fake_graph,
+            )
+        )
+
+        self.assertIsNotNone(fake_graph.captured_config)
+        recursion_limit = fake_graph.captured_config.get("recursion_limit")
+        self.assertIsInstance(recursion_limit, int)
+        self.assertGreater(recursion_limit, 25)
 
     async def test_stream_agent_events_publishes_reduce_outputs(self) -> None:
         events = await drain_events(

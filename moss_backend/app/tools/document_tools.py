@@ -37,6 +37,24 @@ class UpdateCanvasElementArgs(BaseModel):
     )
 
 
+class UpdateCanvasElementsOperation(BaseModel):
+    block_ref: str = Field(description="Block reference shown in canvas_context, such as b1 or b2.")
+    action_type: Literal["replace", "append", "insert", "delete"] = Field(
+        default="replace",
+        description="Document mutation type: replace, append, insert, or delete.",
+    )
+    new_html: str = Field(
+        default="",
+        description="Replacement or inserted HTML. May be empty for delete.",
+    )
+
+
+class UpdateCanvasElementsArgs(BaseModel):
+    operations: list[UpdateCanvasElementsOperation] = Field(
+        description="Ordered document mutations to apply. Each operation targets one block_ref."
+    )
+
+
 class ParsedHtmlBlock(BaseModel):
     block_id: str
     index: int
@@ -300,11 +318,44 @@ def update_canvas_element(
     )
 
 
+@tool(args_schema=UpdateCanvasElementsArgs)
+def update_canvas_elements(
+    operations: list[dict[str, Any]],
+    _batch_results: list[dict[str, Any]] | None = None,
+) -> str:
+    """Dispatch ordered document mutations for multiple canvas blocks."""
+
+    results = _batch_results
+    if results is None:
+        results = [
+            {
+                "ok": True,
+                "block_ref": operation.get("block_ref"),
+                "action_type": operation.get("action_type", "replace"),
+            }
+            for operation in operations
+        ]
+
+    applied_count = sum(1 for result in results if result.get("ok") is True)
+    error_count = sum(1 for result in results if result.get("ok") is not True)
+
+    return _json_result(
+        {
+            "ok": applied_count > 0,
+            "operation": "update_canvas_elements",
+            "applied_count": applied_count,
+            "error_count": error_count,
+            "results": results,
+        }
+    )
+
+
 DOCUMENT_TOOLS = [
     search_document_blocks,
     canvas_read_before,
     canvas_read_after,
     update_canvas_element,
+    update_canvas_elements,
     generate_download_link,
 ]
 

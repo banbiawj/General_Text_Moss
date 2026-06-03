@@ -173,6 +173,7 @@ START -> intent -> task_assemble -> execute
 
 - `search_document_blocks`: parses `canvas_snapshot`, builds a lightweight outline, ranks matching `moss-block-*` blocks, and optionally returns block HTML for edit planning.
 - `update_canvas_element`: does not edit server-side HTML. It returns a tool result and lets the route forward the mutation to the browser as `dom_mutation`.
+- `update_canvas_elements`: batches ordered `update_canvas_element`-style operations. Valid block references are forwarded as individual `dom_mutation` events; invalid references are reported in the tool result without blocking valid operations.
 - `generate_download_link`: stores an in-memory export artifact in `DOWNLOAD_CACHE` and returns `/api/v1/download/{token}`.
 
 ## Tests

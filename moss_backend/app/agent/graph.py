@@ -37,7 +37,7 @@ from app.services.canvas_context import (
     render_canvas_context,
     strip_moss_block_id,
 )
-from app.services.document_content import tailor_context
+from app.services.document_content import _extract_moss_blocks, tailor_context
 from app.tools.document_tools import DOCUMENT_TOOLS
 
 
@@ -158,8 +158,13 @@ TASK_TYPE_TOOLS: dict[TaskType, list[str]] = {
         "canvas_read_before",
         "canvas_read_after",
         "update_canvas_element",
+        "update_canvas_elements",
     ],
-    "global_edit": ["canvas_read_before", "canvas_read_after", "update_canvas_element"],
+    "global_edit": [
+        "canvas_read_before",
+        "canvas_read_after",
+        "update_canvas_elements",
+    ],
 }
 
 
@@ -927,6 +932,98 @@ def _resolve_update_canvas_element_args(
     return args, None
 
 
+def _resolve_update_canvas_elements_args(
+    *,
+    state: dict[str, Any],
+    task: AgentTask,
+    tool_args: dict[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    operations = tool_args.get("operations")
+    if not isinstance(operations, list):
+        return {
+            "operations": [],
+            "_batch_results": [
+                {
+                    "ok": False,
+                    "error": "invalid_operations",
+                    "message": "operations must be a list.",
+                }
+            ],
+        }, []
+
+    resolved_operations: list[dict[str, Any]] = []
+    mutation_operations: list[dict[str, Any]] = []
+    batch_results: list[dict[str, Any]] = []
+    valid_element_ids = {
+        block.block_id
+        for block in _extract_moss_blocks(str(state.get("canvas_snapshot") or ""))
+    }
+
+    for index, operation in enumerate(operations):
+        if not isinstance(operation, dict):
+            batch_results.append(
+                {
+                    "ok": False,
+                    "error": "invalid_operation",
+                    "index": index,
+                    "message": "operation must be an object.",
+                }
+            )
+            continue
+
+        block_ref = operation.get("block_ref")
+        element_id = _resolve_block_ref_from_task(task, block_ref)
+        action_type = operation.get("action_type", "replace")
+        new_html = operation.get("new_html", "")
+
+        if not element_id:
+            batch_results.append(
+                {
+                    "ok": False,
+                    "error": "unknown_block_ref",
+                    "block_ref": block_ref,
+                    "action_type": action_type,
+                    "message": "block_ref is not available in the current canvas context.",
+                    "hint": "Use the exact block_ref shown in canvas_context, such as b1 or b2.",
+                }
+            )
+            continue
+
+        if element_id not in valid_element_ids:
+            batch_results.append(
+                {
+                    "ok": False,
+                    "error": "element_id_not_found",
+                    "block_ref": str(block_ref),
+                    "action_type": action_type,
+                    "message": "element_id does not exist in current canvas_snapshot.",
+                    "hint": "Use the exact block_ref shown in canvas_context, such as b1 or b2.",
+                }
+            )
+            continue
+
+        resolved_operation = {
+            "block_ref": str(block_ref),
+            "element_id": element_id,
+            "action_type": action_type,
+            "new_html": new_html,
+        }
+        resolved_operations.append(resolved_operation)
+        mutation_operations.append(resolved_operation)
+        batch_results.append(
+            {
+                "ok": True,
+                "block_ref": str(block_ref),
+                "action_type": action_type,
+            }
+        )
+
+    return {
+        "operations": resolved_operations,
+        "_batch_results": batch_results,
+    }, mutation_operations
+
+
 def _resolve_canvas_read_args(
     *,
     task: AgentTask,
@@ -1087,6 +1184,7 @@ def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask],
 
             args = dict(tool_args)
             resolved_block_ref: str | None = None
+            batch_mutation_operations: list[dict[str, Any]] = []
             if tool_name == "update_canvas_element":
                 args, ref_error = _resolve_update_canvas_element_args(
                     task=task,
@@ -1109,6 +1207,12 @@ def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask],
                     )
                     continue
                 resolved_block_ref = args.pop("_block_ref", None)
+            elif tool_name == "update_canvas_elements":
+                args, batch_mutation_operations = _resolve_update_canvas_elements_args(
+                    state=state,
+                    task=task,
+                    tool_args=tool_args,
+                )
             elif tool_name in {"canvas_read_before", "canvas_read_after"}:
                 args, ref_error = _resolve_canvas_read_args(
                     task=task,
@@ -1133,7 +1237,7 @@ def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask],
                     continue
             if tool_name in STATEFUL_DOCUMENT_TOOL_NAMES:
                 args["state"] = state
-            if tool_name == "update_canvas_element" and hasattr(tool, "func"):
+            if tool_name in {"update_canvas_element", "update_canvas_elements"} and hasattr(tool, "func"):
                 result = tool.func(**args)
             else:
                 result = tool.invoke(args)
@@ -1194,6 +1298,18 @@ def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask],
                     "action_type": args.get("action_type", ""),
                     "new_html": args.get("new_html", ""),
                 })
+        elif tool_name == "update_canvas_elements":
+            try:
+                mutation_payload = json.loads(result_str)
+            except json.JSONDecodeError:
+                mutation_payload = {}
+            if isinstance(mutation_payload, dict) and mutation_payload.get("applied_count", 0) > 0:
+                for operation in batch_mutation_operations:
+                    pending_mutations.append({
+                        "element_id": operation.get("element_id", ""),
+                        "action_type": operation.get("action_type", ""),
+                        "new_html": operation.get("new_html", ""),
+                    })
 
     tasks[current_idx] = {**task, "task_message": task_messages + tool_results}
     return tasks, pending_mutations
@@ -1468,7 +1584,11 @@ async def stream_agent_events(
     )
 
     runtime_graph = compiled_graph or graph
-    config = {"configurable": {"thread_id": conversation_id}}
+    settings = get_settings()
+    config = {
+        "configurable": {"thread_id": conversation_id},
+        "recursion_limit": settings.agent_recursion_limit,
+    }
 
     async for event in runtime_graph.astream_events(
         initial_state,

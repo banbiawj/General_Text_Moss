@@ -288,6 +288,166 @@ class CanvasPagingGraphTests(unittest.TestCase):
         self.assertEqual(payload["block_ref"], "b1")
         self.assertNotIn("element_id", payload)
 
+    def test_tools_node_resolves_batch_update_canvas_elements_with_partial_errors(self) -> None:
+        task = {
+            "task_message": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "update_canvas_elements",
+                            "args": {
+                                "operations": [
+                                    {
+                                        "block_ref": "b1",
+                                        "action_type": "replace",
+                                        "new_html": "<p>first updated</p>",
+                                    },
+                                    {
+                                        "block_ref": "b99",
+                                        "action_type": "replace",
+                                        "new_html": "<p>missing</p>",
+                                    },
+                                    {
+                                        "block_ref": "b2",
+                                        "action_type": "delete",
+                                        "new_html": "",
+                                    },
+                                ]
+                            },
+                            "id": "call-update-batch",
+                            "type": "tool_call",
+                        }
+                    ],
+                )
+            ],
+            "canvas_context_blocks": [
+                {
+                    "block_id": "moss-block-one",
+                    "block_ref": "b1",
+                    "index": 0,
+                    "tag": "p",
+                    "heading_path": [],
+                    "text": "one",
+                    "html": '<p id="moss-block-one">one</p>',
+                    "source": "initial",
+                    "added_at": 0,
+                },
+                {
+                    "block_id": "moss-block-two",
+                    "block_ref": "b2",
+                    "index": 1,
+                    "tag": "p",
+                    "heading_path": [],
+                    "text": "two",
+                    "html": '<p id="moss-block-two">two</p>',
+                    "source": "initial",
+                    "added_at": 0,
+                },
+            ],
+            "block_ref_map": {"b1": "moss-block-one", "b2": "moss-block-two"},
+            "canvas_context_operation_seq": 0,
+            "task_tools": ["update_canvas_elements"],
+            "task_prompt": "",
+        }
+        state = {
+            "messages": [],
+            "user_input": "Rewrite these",
+            "canvas_snapshot": (
+                '<p id="moss-block-one">one</p>'
+                '<p id="moss-block-two">two</p>'
+            ),
+            "focus_element_id": "moss-block-one",
+            "focus_block_id": "moss-block-one",
+            "task_type": "local_edit",
+            "task_reason": "",
+            "current_task_index": 0,
+            "pending_mutations": [],
+            "tasks": [task],
+        }
+
+        result = tools_node(state)
+
+        self.assertEqual(
+            result["pending_mutations"],
+            [
+                {
+                    "element_id": "moss-block-one",
+                    "action_type": "replace",
+                    "new_html": "<p>first updated</p>",
+                },
+                {
+                    "element_id": "moss-block-two",
+                    "action_type": "delete",
+                    "new_html": "",
+                },
+            ],
+        )
+        payload = json.loads(result["tasks"][0]["task_message"][-1].content)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["operation"], "update_canvas_elements")
+        self.assertEqual(payload["applied_count"], 2)
+        self.assertEqual(payload["error_count"], 1)
+        self.assertEqual(payload["results"][0]["block_ref"], "b1")
+        self.assertEqual(payload["results"][1]["error"], "unknown_block_ref")
+        self.assertEqual(payload["results"][2]["block_ref"], "b2")
+        self.assertNotIn("moss-block-", result["tasks"][0]["task_message"][-1].content)
+
+    def test_batch_update_canvas_elements_rejects_missing_element_id(self) -> None:
+        task = {
+            "task_message": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "update_canvas_elements",
+                            "args": {
+                                "operations": [
+                                    {
+                                        "block_ref": "b1",
+                                        "action_type": "replace",
+                                        "new_html": "<p>updated</p>",
+                                    }
+                                ]
+                            },
+                            "id": "call-update-batch-missing",
+                            "type": "tool_call",
+                        }
+                    ],
+                )
+            ],
+            "canvas_context_blocks": [
+                {"block_id": "moss-block-missing", "block_ref": "b1", "index": 0}
+            ],
+            "block_ref_map": {"b1": "moss-block-missing"},
+            "canvas_context_operation_seq": 0,
+            "task_tools": ["update_canvas_elements"],
+            "task_prompt": "",
+        }
+        state = {
+            "messages": [],
+            "user_input": "Rewrite this",
+            "canvas_snapshot": '<p id="moss-block-real">real</p>',
+            "focus_element_id": "moss-block-real",
+            "focus_block_id": "moss-block-real",
+            "task_type": "local_edit",
+            "task_reason": "",
+            "current_task_index": 0,
+            "pending_mutations": [],
+            "tasks": [task],
+        }
+
+        result = tools_node(state)
+
+        self.assertEqual(result["pending_mutations"], [])
+        payload = json.loads(result["tasks"][0]["task_message"][-1].content)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["applied_count"], 0)
+        self.assertEqual(payload["error_count"], 1)
+        self.assertEqual(payload["results"][0]["error"], "element_id_not_found")
+        self.assertEqual(payload["results"][0]["block_ref"], "b1")
+        self.assertNotIn("moss-block-", result["tasks"][0]["task_message"][-1].content)
+
     def test_tools_node_rejects_unknown_block_ref_before_tool_invoke(self) -> None:
         task = {
             "task_message": [
@@ -520,6 +680,38 @@ class CanvasPagingGraphTests(unittest.TestCase):
         self.assertIn("canvas_read_after", task["task_prompt"])
         self.assertIn("ordered as they appear in the document", task["task_prompt"])
         self.assertNotIn("moss-block-", task["task_prompt"])
+
+    def test_edit_task_prompts_expose_batch_update_tool(self) -> None:
+        for task_type in ("local_edit", "global_edit"):
+            with self.subTest(task_type=task_type):
+                state = {
+                    "task_type": task_type,
+                    "canvas_snapshot": _snapshot(3),
+                    "focus_block_id": "moss-block-1",
+                    "focus_element_id": "moss-block-1",
+                    "user_input": "Polish these blocks",
+                }
+
+                task = task_assemble_node(state)["tasks"][0]
+
+                self.assertIn("update_canvas_elements", task["task_tools"])
+                self.assertIn("update_canvas_elements", task["task_prompt"])
+
+    def test_global_edit_uses_batch_update_tool_without_single_block_update(self) -> None:
+        task = task_assemble_node(
+            {
+                "task_type": "global_edit",
+                "canvas_snapshot": _snapshot(3),
+                "focus_block_id": "moss-block-1",
+                "focus_element_id": "moss-block-1",
+                "user_input": "Polish the whole document",
+            }
+        )["tasks"][0]
+
+        self.assertIn("update_canvas_elements", task["task_tools"])
+        self.assertNotIn("update_canvas_element", task["task_tools"])
+        self.assertIn("update_canvas_elements", task["task_prompt"])
+        self.assertNotIn("'update_canvas_element'", task["task_prompt"])
 
 
 if __name__ == "__main__":

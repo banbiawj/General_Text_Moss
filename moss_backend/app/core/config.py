@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     enable_mock_llm: bool = Field(default=True, alias="ENABLE_MOCK_LLM")
     enable_llm_logging: bool = Field(default=True, alias="ENABLE_LLM_LOGGING")
     llm_log_file: Path = Field(default=Path("logs") / "llm_messages.jsonl", alias="LLM_LOG_FILE")
+    agent_recursion_limit: int = Field(
+        default=100,
+        ge=26,
+        alias="AGENT_RECURSION_LIMIT",
+    )
 
     storage_dir: Path = Field(default=Path("storage"), alias="STORAGE_DIR")
     conversation_metadata_db: Path | None = Field(

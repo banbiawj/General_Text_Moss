@@ -8,8 +8,8 @@ from typing import Literal
 
 MOSS_BLOCK_ID_PREFIX = "moss-block-"
 TailorContextTaskType = Literal["local_edit", "global_edit", "document_qa"]
-GLOBAL_EDIT_TOKEN_THRESHOLD = 10_000
-GLOBAL_EDIT_TARGET_CHUNK_TOKENS = 10_000
+GLOBAL_EDIT_TOKEN_THRESHOLD = 5_000
+GLOBAL_EDIT_TARGET_CHUNK_TOKENS = 5_000
 
 
 @dataclass(frozen=True)

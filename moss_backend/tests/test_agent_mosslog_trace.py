@@ -174,6 +174,36 @@ class AgentMosslogTraceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response_kwargs["raw_payload"]["full_response"]["content"], "model answer")
         self.assertIn("duration_ms", response_kwargs)
 
+    async def test_send_worker_llm_logs_expose_source_task_index(self) -> None:
+        task = {
+            "task_id": "task-3",
+            "task_prompt": "system prompt",
+            "task_message": [],
+            "task_tools": [],
+            "status": "pending",
+        }
+        state = {
+            "tasks": [task],
+            "current_task_index": 0,
+            "source_task_index": 2,
+            "conversation_messages": [],
+            "session_id": "session-1",
+            "conversation_id": "conversation-1",
+            "request_id": "request-1",
+        }
+
+        with patch.object(graph_module, "ChatOpenAI", FakeChatOpenAI):
+            with patch.object(graph_module, "log_llm_request") as log_llm_request:
+                with patch.object(graph_module, "log_llm_response") as log_llm_response:
+                    execute_task_node(state)
+
+        request_kwargs = log_llm_request.call_args.kwargs
+        response_kwargs = log_llm_response.call_args.kwargs
+        self.assertEqual(request_kwargs["task_index"], 2)
+        self.assertEqual(response_kwargs["task_index"], 2)
+        self.assertEqual(request_kwargs["raw_payload"]["task_index"], 2)
+        self.assertEqual(response_kwargs["raw_payload"]["task_index"], 2)
+
     async def test_run_tools_logs_only_tool_result_with_raw_payload(self) -> None:
         tool_call = {
             "name": "fake_tool",
@@ -189,6 +219,7 @@ class AgentMosslogTraceTests(unittest.IsolatedAsyncioTestCase):
                 }
             ],
             "current_task_index": 0,
+            "source_task_index": 3,
             "session_id": "session-1",
             "conversation_id": "conversation-1",
             "request_id": "request-1",
@@ -203,6 +234,7 @@ class AgentMosslogTraceTests(unittest.IsolatedAsyncioTestCase):
             "fake_tool",
             {"ok": True, "args": {"query": "needle"}},
             duration_ms=ANY,
+            task_index=3,
             raw_payload={
                 "tool_call_id": "call-1",
                 "args": {"query": "needle"},
@@ -212,6 +244,8 @@ class AgentMosslogTraceTests(unittest.IsolatedAsyncioTestCase):
                 "request_id": "request-1",
                 "task_id": "task-1",
                 "current_task_index": 0,
+                "source_task_index": 3,
+                "task_index": 3,
             },
         )
 
@@ -255,6 +289,18 @@ class AgentMosslogTraceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("fields.task_type", index_html)
         self.assertIn("fields.reason", index_html)
         self.assertIn("fields.mutations", index_html)
+        self.assertIn("fields.task_index", index_html)
+
+    async def test_mosslog_frontend_has_task_dropdown_filter(self) -> None:
+        index_html = (
+            Path(__file__).parents[1] / "app" / "mosslog" / "static" / "index.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('id="task-filter"', index_html)
+        self.assertIn('value="all"', index_html)
+        self.assertIn("activeTaskFilter", index_html)
+        self.assertIn("eventTaskIndex", index_html)
+        self.assertIn("refreshTaskFilterOptions", index_html)
 
 
 if __name__ == "__main__":

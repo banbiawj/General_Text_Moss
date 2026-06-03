@@ -59,6 +59,13 @@ def _ensure_langchain_legacy_debug_attr() -> None:
 _ensure_langchain_legacy_debug_attr()
 
 
+def _effective_task_index(state: dict[str, Any]) -> Any:
+    source_task_index = state.get("source_task_index")
+    if source_task_index is not None:
+        return source_task_index
+    return state.get("current_task_index")
+
+
 def _trace_context(state: dict[str, Any], task: dict[str, Any] | None = None) -> dict[str, Any]:
     context = {
         "session_id": state.get("session_id"),
@@ -66,11 +73,20 @@ def _trace_context(state: dict[str, Any], task: dict[str, Any] | None = None) ->
         "request_id": state.get("request_id"),
         "task_type": state.get("task_type"),
         "current_task_index": state.get("current_task_index"),
+        "source_task_index": state.get("source_task_index"),
+        "task_index": _effective_task_index(state),
     }
     if task is not None:
         context["task_id"] = task.get("task_id")
         context["task_status"] = task.get("status")
     return {key: value for key, value in context.items() if value is not None}
+
+
+def _visible_trace_fields(context: dict[str, Any]) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    if "task_index" in context:
+        fields["task_index"] = context["task_index"]
+    return fields
 
 
 def _trace_payload(value: Any) -> Any:
@@ -560,6 +576,7 @@ def _invoke_llm_with_trace(
     tools: list[Any],
 ) -> Any:
     context = _trace_context(state, task)
+    visible_context = _visible_trace_fields(context)
     trace_messages = _trace_messages(messages)
     tool_names = [getattr(tool, "name", str(tool)) for tool in tools]
     log_llm_request(
@@ -572,6 +589,7 @@ def _invoke_llm_with_trace(
             "task": _trace_task(task),
             **context,
         },
+        **visible_context,
     )
     started_at = perf_counter()
     try:
@@ -592,6 +610,7 @@ def _invoke_llm_with_trace(
             "full_response": response_payload,
             **context,
         },
+        **visible_context,
     )
     return response
 
@@ -1134,6 +1153,7 @@ def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask],
             **_trace_context(state, task),
             "tool_call_id": tool_call.get("id"),
         }
+        visible_tool_context = _visible_trace_fields(tool_context)
         started_at = perf_counter()
         tool = next(
             (t for t in DOCUMENT_TOOLS if t.name == tool_name),
@@ -1150,6 +1170,7 @@ def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask],
                     "result": result_str,
                     **tool_context,
                 },
+                **visible_tool_context,
             )
             tool_results.append(
                 ToolMessage(
@@ -1176,6 +1197,7 @@ def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask],
                         "result": result_str,
                         **tool_context,
                     },
+                    **visible_tool_context,
                 )
                 tool_results.append(
                     ToolMessage(content=result_str, tool_call_id=tool_call["id"])
@@ -1201,6 +1223,7 @@ def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask],
                             "result": result_str,
                             **tool_context,
                         },
+                        **visible_tool_context,
                     )
                     tool_results.append(
                         ToolMessage(content=result_str, tool_call_id=tool_call["id"])
@@ -1230,6 +1253,7 @@ def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask],
                             "result": result_str,
                             **tool_context,
                         },
+                        **visible_tool_context,
                     )
                     tool_results.append(
                         ToolMessage(content=result_str, tool_call_id=tool_call["id"])
@@ -1256,6 +1280,7 @@ def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask],
                     "result": _trace_payload(result),
                     **tool_context,
                 },
+                **visible_tool_context,
             )
             task = _apply_canvas_context_tool_result(
                 state=state,
@@ -1280,6 +1305,7 @@ def _run_tools_for_current_task(state: dict[str, Any]) -> tuple[list[AgentTask],
                     "error": str(e),
                     **tool_context,
                 },
+                **visible_tool_context,
             )
 
         tool_results.append(

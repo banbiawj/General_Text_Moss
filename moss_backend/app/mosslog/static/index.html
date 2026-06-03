@@ -50,9 +50,13 @@
       letter-spacing: 0;
     }
 
-    button { font: inherit; border: none; cursor: pointer; }
+    button,
+    select { font: inherit; }
+
+    button { border: none; cursor: pointer; }
 
     button:focus-visible,
+    select:focus-visible,
     summary:focus-visible {
       outline: 2px solid #0f172a;
       outline-offset: 2px;
@@ -104,6 +108,26 @@
       transition: all 0.2s;
     }
     .filter.active { background: #0f172a; color: #fff; border-color: #0f172a; }
+    .task-filter-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .task-select {
+      min-width: 116px;
+      height: 32px;
+      padding: 0 30px 0 10px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      cursor: pointer;
+    }
     .actions { display: flex; gap: 8px; }
     .icon-button {
       width: 34px;
@@ -315,6 +339,7 @@
     @media (max-width: 720px) {
       .page { width: min(1120px, calc(100vw - 20px)); padding-top: 18px; }
       .toolbar { align-items: flex-start; flex-direction: column; }
+      .task-filter-wrap { margin-left: 0; }
       summary { grid-template-columns: 1fr; gap: 6px; padding: 12px; }
       .message { white-space: normal; }
       .meta { white-space: normal; }
@@ -343,6 +368,12 @@
         <button class="filter" data-filter="debug">DEBUG</button>
         <button class="filter" data-filter="error">ERROR</button>
       </div>
+      <label class="task-filter-wrap" for="task-filter">
+        Task
+        <select class="task-select" id="task-filter">
+          <option value="all">ALL</option>
+        </select>
+      </label>
       <div class="actions">
         <button class="icon-button" id="pause-button" aria-label="Pause visible updates" title="Pause visible updates" type="button">
           <svg class="icon" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
@@ -377,6 +408,7 @@
     let events = [];
     let pendingEvents = [];
     let activeFilter = "all";
+    let activeTaskFilter = "all";
     let paused = false;
     let source = null;
 
@@ -388,6 +420,7 @@
     const pauseButtonEl = document.getElementById("pause-button");
     const clearButtonEl = document.getElementById("clear-button");
     const filtersEl = document.getElementById("filters");
+    const taskFilterEl = document.getElementById("task-filter");
     const pauseIcon = `
       <svg class="icon" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
         <rect x="6" y="4" width="4" height="16" rx="1"></rect>
@@ -490,6 +523,20 @@
     function compactValue(value) {
       const text = formatValue(value).replace(/\s+/g, " ").trim();
       return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+    }
+
+    function eventTaskIndex(event) {
+      const fields = event.fields || {};
+      const value = fields.task_index;
+      if (value === null || value === undefined || value === "") {
+        return null;
+      }
+      const index = Number(value);
+      return Number.isInteger(index) && index >= 0 ? index : null;
+    }
+
+    function taskLabel(taskIndex) {
+      return `Task ${taskIndex + 1}`;
     }
 
     function appendText(parent, text) {
@@ -601,6 +648,8 @@
     function eventMeta(event) {
       const fields = event.fields || {};
       const parts = [];
+      const taskIndex = eventTaskIndex(event);
+      if (taskIndex !== null) parts.push(taskLabel(taskIndex));
       if (fields.model) parts.push(fields.model);
       if (fields.duration_ms !== undefined) parts.push(`${fields.duration_ms} ms`);
       if (fields.usage) parts.push("usage");
@@ -649,13 +698,46 @@
     }
 
     function visibleEvents() {
-      if (activeFilter === "all") {
-        return events;
+      return events.filter((event) => {
+        if (activeFilter !== "all" && String(event.tag || "").toLowerCase() !== activeFilter) {
+          return false;
+        }
+        if (activeTaskFilter === "all") {
+          return true;
+        }
+        return String(eventTaskIndex(event)) === activeTaskFilter;
+      });
+    }
+
+    function refreshTaskFilterOptions() {
+      const taskIndexes = Array.from(new Set(
+        events
+          .map(eventTaskIndex)
+          .filter((taskIndex) => taskIndex !== null)
+      )).sort((a, b) => a - b);
+
+      const selected = activeTaskFilter;
+      taskFilterEl.replaceChildren();
+
+      const allOption = document.createElement("option");
+      allOption.value = "all";
+      allOption.textContent = "ALL";
+      taskFilterEl.appendChild(allOption);
+
+      for (const taskIndex of taskIndexes) {
+        const option = document.createElement("option");
+        option.value = String(taskIndex);
+        option.textContent = taskLabel(taskIndex);
+        taskFilterEl.appendChild(option);
       }
-      return events.filter((event) => String(event.tag || "").toLowerCase() === activeFilter);
+
+      const available = selected === "all" || taskIndexes.includes(Number(selected));
+      activeTaskFilter = available ? selected : "all";
+      taskFilterEl.value = activeTaskFilter;
     }
 
     function render() {
+      refreshTaskFilterOptions();
       const items = visibleEvents();
       eventCountEl.textContent = String(events.length);
       eventsEl.replaceChildren();
@@ -717,6 +799,11 @@
       for (const item of filtersEl.querySelectorAll(".filter")) {
         item.classList.toggle("active", item === button);
       }
+      render();
+    });
+
+    taskFilterEl.addEventListener("change", () => {
+      activeTaskFilter = taskFilterEl.value;
       render();
     });
 

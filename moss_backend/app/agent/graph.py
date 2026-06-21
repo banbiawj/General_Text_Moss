@@ -191,7 +191,7 @@ TASK_TYPE_TOOL_BUDGETS: dict[TaskType, dict[str, dict[str, Any]] | None] = {
     "global_edit": {
         "context_read": {
             "tools": ["canvas_read_before", "canvas_read_after"],
-            "limit": 1,
+            "limit": 4,
             "message": "全局编辑任务的上下文翻阅次数已用完。请基于当前 chunk 继续完成修改，不要继续调用翻阅工具。",
         }
     },

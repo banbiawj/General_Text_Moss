@@ -8,3 +8,4 @@ __pycache__/
 .tmp/
 moss_backend/app/core/.env
 moss_backend/storage/
+.edge-headless-profile/
